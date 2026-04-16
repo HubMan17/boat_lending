@@ -1,0 +1,79 @@
+#VRML_SIM R2023a utf8
+
+# Phase 1 — Stage 1: static ArUco marker on flat ground.
+#
+# Scene: plain 50x50 m floor (explicit matte mid-grey PBR — NOT the Webots
+# default Floor appearance, which is a wood-parquetry checker that creates
+# spurious quadrilateral candidates for the ArUco detector), single
+# ArucoMarker DICT_4X4_50 id=0 size 1.0 m at the world origin, Iris
+# quadcopter with a downward-facing 640x480 camera. No distractors.
+#
+# Camera is mounted at z=-0.08 in the extensionSlot (vs -0.05 in smoke_iris.wbt)
+# so the lens clears the Iris body bounding box (0.47x0.47x0.11, z-extent +-0.055)
+# and is not occluded by the Iris mesh. The landing legs (thin cylinders at the
+# four corners, r=0.008) do not intersect the centered camera line of sight.
+#
+# Iris spawns at the origin; the end-to-end test (P1.10) flies a 5 m GUIDED
+# offset before initiating LAND with PRECLAND.
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "../protos/Iris.proto"
+EXTERNPROTO "../protos/ArucoMarker.proto"
+
+WorldInfo {
+  title "boat_lending Phase 1 Stage 1 — static ArUco on ground"
+  basicTimeStep 2
+  FPS 20
+}
+Viewpoint {
+  orientation -0.3 0.3 0.9 1.2
+  position -5 -5 6
+  follow "Iris"
+  followSmoothness 0.1
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+Floor {
+  size 50 50
+  appearance PBRAppearance {
+    baseColor 0.5 0.5 0.5
+    roughness 1
+    metalness 0
+  }
+}
+ArucoMarker {
+  translation 0 0 0.001
+  rotation 0 0 1 0
+  name "aruco 0"
+  size 1.0
+  markerId "0"
+}
+Iris {
+  # With landing legs the body origin rests at world z=0.155; spawn slightly
+  # above that so the drop is gentle.
+  translation 0 0 0.2
+  controller "ardupilot_vehicle_controller"
+  controllerArgs [
+    "--motors"
+    "m1_motor, m2_motor, m3_motor, m4_motor"
+    "--camera"
+    "camera"
+    "--camera-port"
+    "5599"
+    "--sitl-address"
+    "127.0.0.1"
+  ]
+  extensionSlot [
+    Camera {
+      translation 0 0 -0.08
+      rotation 0 1 0 1.5707963
+      width 640
+      height 480
+      name "camera"
+    }
+  ]
+}
