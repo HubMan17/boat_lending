@@ -41,7 +41,9 @@ ArucoMarker {
   markerId "0"
 }
 Iris {
-  translation 0 0 0.1
+  # With landing legs the body origin rests at world z=0.155; spawn slightly
+  # above that so the drop is gentle.
+  translation 0 0 0.2
   controller "ardupilot_vehicle_controller"
   controllerArgs [
     "--motors"

@@ -144,9 +144,91 @@ PROTO Iris [
       }
       InertialUnit {
       }
+      # Landing legs (local modification — upstream Iris has none).
+      # 4 vertical cylinders at the frame corners, extending 0.1 m below
+      # the body. With the body half-height 0.055, legs settle the drone
+      # with its body origin at world z = 0.155, leaving ~0.105 m of
+      # clearance between a downward camera at relative z=-0.05 and the
+      # ground plane — enough for the downward ArUco marker to be in view
+      # even when Iris is at rest.
+      DEF LEG_GROUP Group {
+        children [
+          DEF LEG_FL Transform {
+            translation 0.12 -0.18 -0.105
+            children [
+              Shape {
+                appearance DEF LEG_APPEARANCE PBRAppearance {
+                  baseColor 0.05 0.05 0.05
+                  metalness 0.2
+                  roughness 0.8
+                }
+                geometry DEF LEG_GEOM Cylinder {
+                  height 0.1
+                  radius 0.008
+                }
+              }
+            ]
+          }
+          DEF LEG_FR Transform {
+            translation 0.12 0.18 -0.105
+            children [
+              Shape {
+                appearance USE LEG_APPEARANCE
+                geometry USE LEG_GEOM
+              }
+            ]
+          }
+          DEF LEG_RL Transform {
+            translation -0.12 -0.18 -0.105
+            children [
+              Shape {
+                appearance USE LEG_APPEARANCE
+                geometry USE LEG_GEOM
+              }
+            ]
+          }
+          DEF LEG_RR Transform {
+            translation -0.12 0.18 -0.105
+            children [
+              Shape {
+                appearance USE LEG_APPEARANCE
+                geometry USE LEG_GEOM
+              }
+            ]
+          }
+        ]
+      }
     ]
-    boundingObject Box {
-       size 0.470000 0.470000 0.110000
+    boundingObject Group {
+      children [
+        Box {
+          size 0.470000 0.470000 0.110000
+        }
+        Transform {
+          translation 0.12 -0.18 -0.105
+          children [
+            Cylinder { height 0.1 radius 0.008 }
+          ]
+        }
+        Transform {
+          translation 0.12 0.18 -0.105
+          children [
+            Cylinder { height 0.1 radius 0.008 }
+          ]
+        }
+        Transform {
+          translation -0.12 -0.18 -0.105
+          children [
+            Cylinder { height 0.1 radius 0.008 }
+          ]
+        }
+        Transform {
+          translation -0.12 0.18 -0.105
+          children [
+            Cylinder { height 0.1 radius 0.008 }
+          ]
+        }
+      ]
     }
     physics Physics {
       density -1
