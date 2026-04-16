@@ -86,6 +86,7 @@ MAVLink UDP traffic between WSL and Windows flows over localhost without extra c
 
 - [SITL in WSL2](docs/setup/sitl_wsl.md) — ArduPlane 4.6.3 QuadPlane build and smoke test
 - [Webots on Windows](docs/setup/webots_windows.md) — Webots R2025a install and smoke test
+- [Python companion on Windows](docs/setup/python_companion_windows.md) — venv, pymavlink, OpenCV ArUco
 
 ## Workflow
 
