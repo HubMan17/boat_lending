@@ -88,6 +88,7 @@ MAVLink UDP traffic between WSL and Windows flows over localhost without extra c
 - [Webots on Windows](docs/setup/webots_windows.md) — Webots R2025a install and smoke test
 - [Python companion on Windows](docs/setup/python_companion_windows.md) — venv, pymavlink, OpenCV ArUco
 - [Mission Planner on Windows](docs/setup/mission_planner_windows.md) — GCS install and SITL connect recipes
+- [End-to-end smoke test](docs/setup/smoke_e2e.md) — Phase 0.5 runbook: SITL + Mission Planner + Webots running concurrently
 
 ## Workflow
 
