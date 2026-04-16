@@ -1,0 +1,23 @@
+* text=auto eol=lf
+
+# Shell scripts run in WSL/Ubuntu — must stay LF regardless of host autocrlf.
+*.sh text eol=lf
+
+# Python too — avoid CRLF surprises for interpreters.
+*.py text eol=lf
+
+# ArduPilot parameter files are read by the autopilot as plain text.
+*.parm text eol=lf
+
+# Windows-only files — keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary / don't-touch
+*.bin binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.wbproj binary
+*.wbt binary
