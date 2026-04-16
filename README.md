@@ -82,6 +82,10 @@ MAVLink UDP traffic between WSL and Windows flows over localhost without extra c
 | 14550 | SITL → GCS | Mission Planner / MAVProxy HUD |
 | 14551 | companion → SITL | `LANDING_TARGET`, `DISTANCE_SENSOR`, `HEARTBEAT` |
 
+## Setup
+
+- [SITL in WSL2](docs/setup/sitl_wsl.md) — ArduPlane 4.6.3 QuadPlane build and smoke test
+
 ## Workflow
 
 - One task = one branch = one session → commit → merge
