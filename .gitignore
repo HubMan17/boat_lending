@@ -1,0 +1,50 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# --- Webots ---
+# Build outputs from controllers
+webots/controllers/**/build/
+webots/controllers/**/*.o
+webots/controllers/**/*.d
+# Webots per-user project state (keep .wbt, drop runtime state)
+*.wbproj.bak
+runtime.ini
+
+# --- ArduPilot SITL logs ---
+logs/
+*.BIN
+*.bin
+*.tlog
+*.TLOG
+*.log
+!**/requirements*.txt.log  # safety: don't ignore accidentally named requirement files
+
+# --- Ground truth / captured data from companion ---
+captures/
+*.csv
+!params/*.parm
+!**/camera_intrinsics.yaml
+
+# --- IDE / editors ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Secrets / local overrides ---
+.env
+.env.local
+*.local.yaml
