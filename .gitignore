@@ -48,3 +48,6 @@ desktop.ini
 .env
 .env.local
 *.local.yaml
+
+# --- Local-only working state ---
+PROGRESS.md
