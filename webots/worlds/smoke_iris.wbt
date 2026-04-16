@@ -1,0 +1,65 @@
+#VRML_SIM R2023a utf8
+
+# Smoke-test world for the Webots <-> ArduCopter JSON-SITL bring-up.
+# Minimal scene: flat grass 50x50 m, one Iris quadcopter with a downward
+# camera, one ArUco marker (DICT_4X4_50 id=0) at the origin for visual
+# confirmation. No distractors. The real Phase 1 scene lives in
+# stage1_static.wbt (P1.1).
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023a/projects/appearances/protos/Grass.proto"
+EXTERNPROTO "../protos/Iris.proto"
+EXTERNPROTO "../protos/ArucoMarker.proto"
+
+WorldInfo {
+  title "boat_lending smoke — ArduCopter + Webots"
+  basicTimeStep 2
+  FPS 20
+}
+Viewpoint {
+  orientation -0.3 0.3 0.9 1.2
+  position -5 -5 6
+  follow "Iris"
+  followSmoothness 0.1
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+Floor {
+  size 50 50
+  appearance Grass {
+  }
+}
+ArucoMarker {
+  translation 0 0 0.001
+  rotation 0 0 1 0
+  name "aruco 0"
+  size 1.0
+  markerId "0"
+}
+Iris {
+  translation 0 0 0.1
+  controller "ardupilot_vehicle_controller"
+  controllerArgs [
+    "--motors"
+    "m1_motor, m2_motor, m3_motor, m4_motor"
+    "--camera"
+    "camera"
+    "--camera-port"
+    "5599"
+    "--sitl-address"
+    "127.0.0.1"
+  ]
+  extensionSlot [
+    Camera {
+      translation 0 0 -0.05
+      rotation 0 1 0 1.5707963
+      width 640
+      height 480
+      name "camera"
+    }
+  ]
+}
