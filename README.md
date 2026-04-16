@@ -1,30 +1,33 @@
 # boat_lending
 
-Simulation stand for autonomous QuadPlane precision landing on a ship deck.
+Simulation stand for autonomous precision landing on a ship deck.
 
-A fully closed-loop SIL pipeline `perception → LANDING_TARGET → ArduPlane PRECLAND` for live tuning of parameters, logs, and behaviour without touching real hardware.
+A fully closed-loop SIL pipeline `perception → LANDING_TARGET → ArduPilot PRECLAND` for live tuning of parameters, logs, and behaviour without touching real hardware.
 
-The detector starts as **ArUco/AprilTag (OpenCV)**: deterministic detection isolates control errors from perception errors. A real CNN on QR/target markers can plug into the same MAVLink interface later with no changes to ArduPlane.
+The detector starts as **ArUco/AprilTag (OpenCV)**: deterministic detection isolates control errors from perception errors. A real CNN on QR/target markers can plug into the same MAVLink interface later with no changes to ArduPilot.
 
 ## Stack
 
-- **Webots R2023b+** (Windows native) — scene simulation, camera, supervisor for ground truth
-- **ArduPlane 4.6.3 SITL** (WSL2 Ubuntu 22.04) — autopilot with PRECLAND + Kalman target estimator
+- **Webots R2023b+** (Windows native) — physics (ODE) + scene simulation + camera + supervisor for ground truth
+- **ArduCopter 4.6.3 SITL** (WSL2 Ubuntu 22.04) — autopilot with PRECLAND + Kalman target estimator, driven by Webots FDM via the JSON-SITL backend (`--model webots-python`). ArduPlane QuadPlane SITL is also built (retained for Phase 4 weathervane work outside Webots).
 - **Python companion** (Windows) — perception + MAVLink bridge
 - **Mission Planner / MAVProxy** — GCS, visualization, tuning
+
+Phase 1–3 fly ArduCopter because ArduPilot's upstream Webots bridge ships only multirotor/rover flight models (fixed-wing needs a custom lift/drag plugin). ArduPlane QuadPlane's QLAND is the same PRECLAND + position-hold code path as Copter LAND, so the companion code and `LANDING_TARGET` interface port 1:1 between the two.
 
 ## Pipeline architecture
 
 ```
-Webots (ship + ArUco-deck + QuadPlane + camera)
-  │ camera frames via Webots controller
-  ▼
+Webots (ODE physics + ship + ArUco-deck + Iris + camera)
+  ├── ardupilot_vehicle_controller  (UDP 9002/9003 JSON-SITL ↔ SITL)
+  └── TCP 5599 grayscale frames
+        ▼
 companion.py
   ├── cv2.aruco.detectMarkers
   ├── pixel offset → body-frame metres (intrinsics + height)
   └── MAVLink LANDING_TARGET → UDP 127.0.0.1:14551
   ▼
-ArduPlane SITL 4.6.3 (QuadPlane, QLAND + PRECLAND)
+ArduCopter SITL 4.6.3 (--model webots-python, LAND + PRECLAND)
   │ MAVLink out → UDP 127.0.0.1:14550
   ▼
 Mission Planner / MAVProxy (GCS)
@@ -53,13 +56,18 @@ boat_lending/
 │   ├── camera_intrinsics.yaml    # fx, fy, cx, cy from Webots
 │   └── groundtruth_logger.py     # parallel gt vs detected log
 ├── webots/
-│   ├── worlds/                   # stage1_static.wbt, stage2_static_ship.wbt, stage3_moving_ship.wbt
-│   ├── controllers/              # quadplane_camera/, ship_mover/
-│   └── protos/                   # ArucoMarker.proto
+│   ├── worlds/                   # smoke_iris.wbt, stage1_static.wbt, stage2_static_ship.wbt, stage3_moving_ship.wbt
+│   ├── controllers/              # ardupilot_vehicle_controller/ (from ArduPilot upstream), ship_mover/
+│   ├── protos/                   # Iris.proto, ArucoMarker.proto (+ meshes/, textures/)
+│   └── UPSTREAM.md               # attribution for imported ArduPilot assets
 ├── params/
-│   └── precland_quadplane.parm   # ArduPlane params for Mission Planner
+│   ├── iris.parm                 # Copter defaults for Webots
+│   └── precland_copter.parm      # PRECLAND / LAND tuning overlay
 ├── scripts/
-│   ├── start_sitl.sh             # sim_vehicle.py wrapper (runs in WSL)
+│   ├── start_arducopter.sh       # arducopter + sitl_udp_bridge.py (WSL)
+│   ├── start_sitl.sh             # arduplane QuadPlane launcher (retained for Phase 4)
+│   ├── sitl_udp_bridge.py        # byte-level TCP 5760 ↔ UDP 14550 relay (replaces MAVProxy)
+│   ├── smoke_arducopter.py       # headless SITL-side smoke gate
 │   └── analyze_precland_log.py   # .BIN parser for PL/CTUN/NKF
 └── README.md
 ```
@@ -69,18 +77,22 @@ boat_lending/
 | Component | Environment | Reason |
 |-----------|-------------|--------|
 | Webots + worlds + controllers | Windows native | GUI simulator, easier to run on Windows |
-| companion.py + OpenCV + pymavlink | Windows | lives next to Webots, talks over TCP/shmem |
-| ArduPlane SITL + MAVProxy | WSL2 Ubuntu 22.04 | `install-prereqs-ubuntu.sh` is the canonical route |
+| companion.py + OpenCV + pymavlink | Windows | lives next to Webots, talks over TCP/UDP |
+| ArduCopter / ArduPlane SITL + transport bridge | WSL2 Ubuntu 22.04 | `install-prereqs-ubuntu.sh` is the canonical route |
 | Mission Planner | Windows | Windows-only binary |
 
-MAVLink UDP traffic between WSL and Windows flows over localhost without extra configuration (WSL2 auto-forwards).
+TCP across the WSL ↔ Windows boundary flows over `localhost` (WSL2 forwards by default). UDP across that boundary needs a known WSL IP — the launch scripts print it and the Webots controller takes it via `--sitl-address`.
 
-## MAVLink endpoints
+## Network endpoints
 
-| Port | Direction | Payload |
-|------|-----------|---------|
-| 14550 | SITL → GCS | Mission Planner / MAVProxy HUD |
-| 14551 | companion → SITL | `LANDING_TARGET`, `DISTANCE_SENSOR`, `HEARTBEAT` |
+| Port | Transport | Direction | Payload |
+|------|-----------|-----------|---------|
+| 5760 | TCP | SITL ↔ bridge | arducopter's primary MAVLink serial |
+| 9002 | UDP | SITL → Webots controller | servo / PWM controls |
+| 9003 | UDP | Webots controller → SITL | FDM: IMU, GPS, orientation, pose |
+| 14550 | UDP | SITL → GCS (via bridge) | Mission Planner HUD |
+| 14551 | UDP | companion ↔ SITL | `LANDING_TARGET`, `DISTANCE_SENSOR`, `HEARTBEAT` |
+| 5599 | TCP | Webots controller → companion | grayscale camera frames |
 
 ## Setup
 
@@ -88,7 +100,12 @@ MAVLink UDP traffic between WSL and Windows flows over localhost without extra c
 - [Webots on Windows](docs/setup/webots_windows.md) — Webots R2025a install and smoke test
 - [Python companion on Windows](docs/setup/python_companion_windows.md) — venv, pymavlink, OpenCV ArUco
 - [Mission Planner on Windows](docs/setup/mission_planner_windows.md) — GCS install and SITL connect recipes
-- [End-to-end smoke test](docs/setup/smoke_e2e.md) — Phase 0.5 runbook: SITL + Mission Planner + Webots running concurrently
+- [End-to-end smoke test (ArduPlane)](docs/setup/smoke_e2e.md) — Phase 0.5 runbook: SITL + Mission Planner + Webots stock scene running concurrently
+- [ArduCopter + Webots JSON-SITL bring-up](docs/setup/arducopter_webots.md) — Phase 0.6 runbook: the Iris + ArduCopter stack used by Phases 1–3
+
+## Design docs
+
+- [Phase 0.6 — Webots + ArduCopter JSON-SITL bring-up](docs/design/2026-04-16-phase0-webots-arducopter-bringup.md)
 
 ## Workflow
 
