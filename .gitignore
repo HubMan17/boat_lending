@@ -14,6 +14,7 @@ webots/controllers/**/build/
 webots/controllers/**/*.o
 webots/controllers/**/*.d
 # Webots per-user project state (keep .wbt, drop runtime state)
+*.wbproj
 *.wbproj.bak
 runtime.ini
 
