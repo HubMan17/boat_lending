@@ -24,6 +24,7 @@
 #   DEFAULTS       base params file    (default: <repo>/params/iris.parm)
 #   EXTRA_DEFAULTS comma-separated extra param files layered on top of DEFAULTS
 #                  (default: empty; example: params/precland_copter.parm)
+#   SERIAL2        extra serial endpoint (default: tcp:0.0.0.0:5763)
 #   LOG_DIR        arducopter log dir  (default: /tmp)
 set -euo pipefail
 
@@ -36,6 +37,7 @@ JSON_PORT="${JSON_PORT:-9002}"
 GCS_PORT="${GCS_PORT:-14550}"
 DEFAULTS="${DEFAULTS:-$REPO_DIR/params/iris.parm}"
 EXTRA_DEFAULTS="${EXTRA_DEFAULTS:-}"
+SERIAL2="${SERIAL2:-tcp:0.0.0.0:5763}"
 LOG_DIR="${LOG_DIR:-/tmp}"
 
 if [[ -z "$WIN_IP" ]]; then
@@ -83,6 +85,7 @@ echo "WSL IP (paste into Webots --sitl-address): $WSL_IP"
 echo "JSON-SITL UDP  : $JSON_PORT (ctrl in)  $((JSON_PORT+1)) (FDM out)"
 echo "GCS UDP port   : $GCS_PORT"
 echo "defaults       : $DEFAULTS"
+echo "serial2 (e2e)  : $SERIAL2"
 echo "arducopter log : $ARDU_LOG"
 echo
 
@@ -99,6 +102,7 @@ sleep 1
     --sim-address "$WIN_IP" \
     --speedup 1 \
     --defaults "$DEFAULTS" \
+    -C "$SERIAL2" \
     > "$ARDU_LOG" 2>&1 &
 SITL_PID=$!
 echo "[start_arducopter] arducopter PID=$SITL_PID"
