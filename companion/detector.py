@@ -58,6 +58,27 @@ class ArucoDetector:
     def camera_matrix(self) -> np.ndarray:
         return self._camera_matrix
 
+    def detect_raw(self, frame: np.ndarray) -> list[tuple]:
+        """Return raw (marker_id, tx, ty, tz, px, py) without body-frame transform.
+        px, py = marker center pixel coordinates."""
+        corners, ids, _ = self._detector.detectMarkers(frame)
+        if ids is None:
+            return []
+        results = []
+        for i, marker_id in enumerate(ids.flatten()):
+            _, tvec, _ = cv2.aruco.estimatePoseSingleMarkers(
+                corners[i : i + 1],
+                self._marker_size,
+                self._camera_matrix,
+                self._dist_coeffs,
+            )
+            tx, ty, tz = tvec[0][0]
+            c = corners[i][0]
+            px = float(c[:, 0].mean())
+            py = float(c[:, 1].mean())
+            results.append((int(marker_id), float(tx), float(ty), float(tz), px, py))
+        return results
+
     def detect(self, frame: np.ndarray) -> list[Detection]:
         corners, ids, _ = self._detector.detectMarkers(frame)
         if ids is None:
@@ -73,12 +94,13 @@ class ArucoDetector:
             )
             tx, ty, tz = tvec[0][0]
 
-            # Camera frame (X=right, Y=down, Z=into scene) to
+            # Camera frame (X=right, Y=down, Z=depth) to
             # body FRD (X=forward, Y=right, Z=down).
-            # Webots camera rotation `0 1 0 pi/2` inverts horizontal
-            # axes relative to body frame.
-            x_body = -ty
-            y_body = -tx
+            # Empirically measured via diag_camera_axes.py:
+            #   NED North → pixel -Y → cam ty maps to body x (forward)
+            #   NED East  → pixel -X → cam tx maps to body y (right)
+            x_body = ty
+            y_body = tx
             z_body = tz
             distance = float(np.linalg.norm(tvec[0][0]))
 
