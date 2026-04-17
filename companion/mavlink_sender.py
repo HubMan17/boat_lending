@@ -123,6 +123,17 @@ class MavlinkSender:
             0, 0,
         )
 
+    def set_mode(self, mode_id: int) -> None:
+        self._conn.set_mode(mode_id)
+
+    def get_mode(self) -> int | None:
+        hb = self._conn.recv_match(type="HEARTBEAT", blocking=False)
+        while hb is not None:
+            if hb.type == mavlink2.MAV_TYPE_QUADROTOR:
+                self._last_mode = hb.custom_mode
+            hb = self._conn.recv_match(type="HEARTBEAT", blocking=False)
+        return getattr(self, "_last_mode", None)
+
     def send_distance_sensor(self, distance_m: float) -> None:
         dist_cm = max(1, min(int(distance_m * 100), 12000))
         self._conn.mav.distance_sensor_send(

@@ -1,8 +1,8 @@
 """Precision-landing companion main loop.
 
-Reads camera frames, detects ArUco markers, and sends
-LANDING_TARGET + DISTANCE_SENSOR to ArduCopter SITL.
-Stage 2 adds optical flow for GPS-denied EKF velocity.
+Stage 1: ArUco detection -> LANDING_TARGET + DISTANCE_SENSOR.
+Stage 2: optical flow (EKF velocity) + ArUco tracker (PID -> velocity cmd),
+         auto-switches LOITER -> GUIDED on marker acquire, back on loss.
 """
 
 import argparse
@@ -14,11 +14,17 @@ from camera_receive import CameraReceiver
 from detector import ArucoDetector
 from mavlink_sender import MavlinkSender
 from optical_flow import OpticalFlow
+from tracker import TargetTracker
 
 TARGET_HZ = 20
 TARGET_DT = 1.0 / TARGET_HZ
 HEARTBEAT_INTERVAL = 1.0
 DEFAULT_ALT = 1.0
+
+GUIDED_MODE = 4
+LOITER_MODE = 5
+ACQUIRE_FRAMES = 3
+LOST_FRAMES = 10
 
 _stop_event = threading.Event()
 
@@ -31,6 +37,7 @@ def run(stage: int, cam_host: str, cam_port: int,
 
     detector = ArucoDetector()
     flow = OpticalFlow() if stage >= 2 else None
+    tracker = TargetTracker() if stage >= 2 else None
     last_alt = DEFAULT_ALT
 
     with CameraReceiver(cam_host, cam_port) as cam, \
@@ -43,6 +50,10 @@ def run(stage: int, cam_host: str, cam_port: int,
         frame_count = 0
         detect_count = 0
         flow_count = 0
+        track_count = 0
+        consecutive_detect = 0
+        consecutive_lost = 0
+        tracking_active = False
 
         while not stop.is_set():
             t0 = time.monotonic()
@@ -65,18 +76,50 @@ def run(stage: int, cam_host: str, cam_port: int,
 
             detections = detector.detect(frame)
 
+            target_det = None
             for det in detections:
-                if det.marker_id != marker_id:
-                    continue
-                mav.send_landing_target(det)
+                if det.marker_id == marker_id:
+                    target_det = det
+                    break
+
+            if target_det is not None:
+                consecutive_detect += 1
+                consecutive_lost = 0
+
                 if flow is None:
-                    mav.send_distance_sensor(det.distance)
+                    mav.send_landing_target(target_det)
+                    mav.send_distance_sensor(target_det.distance)
+
                 detect_count += 1
                 if detect_count % 10 == 1:
-                    print(f"  det: ax={det.angle_x:.3f} ay={det.angle_y:.3f} "
-                          f"d={det.distance:.1f} "
-                          f"bx={det.x_body:.2f} by={det.y_body:.2f} "
-                          f"bz={det.z_body:.2f}")
+                    print(f"  det: ax={target_det.angle_x:.3f} "
+                          f"ay={target_det.angle_y:.3f} "
+                          f"d={target_det.distance:.1f} "
+                          f"bx={target_det.x_body:.2f} "
+                          f"by={target_det.y_body:.2f} "
+                          f"bz={target_det.z_body:.2f}")
+
+                if tracker is not None:
+                    if not tracking_active and consecutive_detect >= ACQUIRE_FRAMES:
+                        mav.set_mode(GUIDED_MODE)
+                        tracker.reset()
+                        tracking_active = True
+                        print("companion: marker acquired -> GUIDED")
+
+                    if tracking_active:
+                        cmd = tracker.update(target_det)
+                        mav.send_velocity(cmd)
+                        track_count += 1
+            else:
+                consecutive_detect = 0
+                consecutive_lost += 1
+
+                if tracker is not None and tracking_active:
+                    if consecutive_lost >= LOST_FRAMES:
+                        mav.set_mode(LOITER_MODE)
+                        tracker.reset()
+                        tracking_active = False
+                        print("companion: marker lost -> LOITER")
 
             now = time.monotonic()
             if now - last_hb >= HEARTBEAT_INTERVAL:
@@ -86,9 +129,11 @@ def run(stage: int, cam_host: str, cam_port: int,
             frame_count += 1
             if frame_count % 100 == 0:
                 alt_info = f" alt={last_alt:.1f}" if flow is not None else ""
+                track_info = f" track={track_count}" if tracker else ""
+                mode_info = " GUIDED" if tracking_active else " LOITER"
                 print(f"companion: frames={frame_count} "
                       f"detections={detect_count} flow={flow_count}"
-                      f"{alt_info}")
+                      f"{track_info}{mode_info}{alt_info}")
 
             elapsed = time.monotonic() - t0
             sleep_time = TARGET_DT - elapsed
@@ -96,7 +141,8 @@ def run(stage: int, cam_host: str, cam_port: int,
                 time.sleep(sleep_time)
 
     print(f"companion: stopped. frames={frame_count} "
-          f"detections={detect_count} flow={flow_count}")
+          f"detections={detect_count} flow={flow_count} "
+          f"track={track_count if tracker else 0}")
 
 
 def main() -> None:
