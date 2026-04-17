@@ -13,6 +13,7 @@ from pymavlink import mavutil
 from pymavlink.dialects.v20 import common as mavlink2
 
 from detector import Detection
+from optical_flow import FlowResult
 
 LANDING_TARGET_FRAME = mavlink2.MAV_FRAME_BODY_FRD
 LANDING_TARGET_TYPE = mavlink2.LANDING_TARGET_TYPE_VISION_FIDUCIAL
@@ -75,6 +76,26 @@ class MavlinkSender:
             LANDING_TARGET_TYPE,
             1,
         )
+
+    def send_optical_flow(self, result: FlowResult) -> None:
+        self._conn.mav.optical_flow_send(
+            self._time_boot_ms(),
+            0,
+            int(result.flow_x * 1e4),
+            int(result.flow_y * 1e4),
+            result.flow_rate_x,
+            result.flow_rate_y,
+            result.quality,
+            result.ground_distance,
+        )
+
+    def recv_altitude(self) -> float | None:
+        msg = self._conn.recv_match(
+            type="GLOBAL_POSITION_INT", blocking=False
+        )
+        if msg is None:
+            return None
+        return msg.relative_alt / 1000.0
 
     def send_distance_sensor(self, distance_m: float) -> None:
         dist_cm = max(1, min(int(distance_m * 100), 12000))
