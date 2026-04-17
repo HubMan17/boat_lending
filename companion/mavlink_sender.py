@@ -14,6 +14,7 @@ from pymavlink.dialects.v20 import common as mavlink2
 
 from detector import Detection
 from optical_flow import FlowResult
+from tracker import VelocityCommand
 
 LANDING_TARGET_FRAME = mavlink2.MAV_FRAME_BODY_FRD
 LANDING_TARGET_TYPE = mavlink2.LANDING_TARGET_TYPE_VISION_FIDUCIAL
@@ -106,6 +107,21 @@ class MavlinkSender:
         if msg is None:
             return None
         return msg.relative_alt / 1000.0
+
+    def send_velocity(self, cmd: VelocityCommand) -> None:
+        type_mask = (
+            0b0000_1101_1100_0111
+        )
+        self._conn.mav.set_position_target_local_ned_send(
+            self._time_boot_ms(),
+            1, 1,
+            mavlink2.MAV_FRAME_BODY_NED,
+            type_mask,
+            0, 0, 0,
+            cmd.vx, cmd.vy, cmd.vz,
+            0, 0, 0,
+            0, 0,
+        )
 
     def send_distance_sensor(self, distance_m: float) -> None:
         dist_cm = max(1, min(int(distance_m * 100), 12000))
