@@ -45,14 +45,14 @@ Floor {
     metalness 0
   }
 }
-ArucoMarker {
+DEF ARUCO_MARKER ArucoMarker {
   translation 0 0 0.001
   rotation 0 0 1 0
   name "aruco 0"
   size 1.0
   markerId "0"
 }
-Iris {
+DEF IRIS Iris {
   # With landing legs the body origin rests at world z=0.155; spawn slightly
   # above that so the drop is gentle.
   translation 0 0 0.2
@@ -76,4 +76,9 @@ Iris {
       name "camera"
     }
   ]
+}
+Robot {
+  name "groundtruth_logger"
+  controller "groundtruth_logger"
+  supervisor TRUE
 }
