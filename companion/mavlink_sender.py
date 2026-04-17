@@ -21,25 +21,23 @@ DISTANCE_SENSOR_ORIENT = mavlink2.MAV_SENSOR_ROTATION_PITCH_270
 
 
 class MavlinkSender:
-    """Send MAVLink precision-landing messages over UDP."""
+    """Send MAVLink precision-landing messages to ArduCopter SITL."""
 
     def __init__(
         self,
-        host: str = "127.0.0.1",
-        port: int = 14551,
+        url: str = "tcp:127.0.0.1:5764",
         source_system: int = 1,
         source_component: int = 197,
     ):
-        self._host = host
-        self._port = port
+        self._url = url
         self._source_system = source_system
         self._source_component = source_component
-        self._conn: mavutil.mavudp | None = None
+        self._conn = None
         self._boot_ms = 0
 
     def connect(self) -> None:
         self._conn = mavutil.mavlink_connection(
-            f"udpout:{self._host}:{self._port}",
+            self._url,
             source_system=self._source_system,
             source_component=self._source_component,
         )

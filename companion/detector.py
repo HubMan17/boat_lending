@@ -73,13 +73,17 @@ class ArucoDetector:
             )
             tx, ty, tz = tvec[0][0]
 
-            angle_x = math.atan2(tx, tz)
-            angle_y = math.atan2(ty, tz)
+            # Camera frame (X=right, Y=down, Z=into scene) to
+            # body FRD (X=forward, Y=right, Z=down).
+            # Webots camera rotation `0 1 0 pi/2` inverts horizontal
+            # axes relative to body frame.
+            x_body = -ty
+            y_body = -tx
+            z_body = tz
             distance = float(np.linalg.norm(tvec[0][0]))
 
-            x_body = tx
-            y_body = ty
-            z_body = tz
+            angle_x = math.atan2(y_body, z_body)  # rightward angle
+            angle_y = math.atan2(x_body, z_body)  # forward angle
 
             results.append(
                 Detection(

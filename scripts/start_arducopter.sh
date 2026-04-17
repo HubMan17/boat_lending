@@ -37,7 +37,8 @@ JSON_PORT="${JSON_PORT:-9002}"
 GCS_PORT="${GCS_PORT:-14550}"
 DEFAULTS="${DEFAULTS:-$REPO_DIR/params/iris.parm}"
 EXTRA_DEFAULTS="${EXTRA_DEFAULTS:-}"
-SERIAL2="${SERIAL2:-tcp:0.0.0.0:5763}"
+SERIAL2="${SERIAL2:-tcp:5763}"  # --serial2: companion connects here
+SERIAL3="${SERIAL3:-tcp:5764}"  # --serial3: e2e script connects here
 LOG_DIR="${LOG_DIR:-/tmp}"
 
 if [[ -z "$WIN_IP" ]]; then
@@ -86,6 +87,7 @@ echo "JSON-SITL UDP  : $JSON_PORT (ctrl in)  $((JSON_PORT+1)) (FDM out)"
 echo "GCS UDP port   : $GCS_PORT"
 echo "defaults       : $DEFAULTS"
 echo "serial2 (e2e)  : $SERIAL2"
+echo "serial3 (comp) : $SERIAL3"
 echo "arducopter log : $ARDU_LOG"
 echo
 
@@ -97,12 +99,13 @@ pkill -9 -f 'sim_vehicle\.py' 2>/dev/null || true
 pkill -9 -f 'sitl_udp_bridge' 2>/dev/null || true
 sleep 1
 
-"$ARDU_BIN" -S -I0 \
+"$ARDU_BIN" -S -I0 -w \
     --model webots-python \
     --sim-address "$WIN_IP" \
     --speedup 1 \
     --defaults "$DEFAULTS" \
-    -C "$SERIAL2" \
+    --serial2 "$SERIAL2" \
+    --serial3 "$SERIAL3" \
     > "$ARDU_LOG" 2>&1 &
 SITL_PID=$!
 echo "[start_arducopter] arducopter PID=$SITL_PID"
@@ -115,7 +118,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+echo "[start_arducopter] waiting for TCP 5760 (up to 60s — start Webots now if not running)..."
+for _ in $(seq 1 60); do
     if ss -tln 2>/dev/null | grep -q ':5760 '; then
         break
     fi
@@ -123,6 +127,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 if ! ss -tln 2>/dev/null | grep -q ':5760 '; then
     echo "ERROR: arducopter failed to open TCP 5760 — see $ARDU_LOG" >&2
+    echo "HINT: Webots must be running with stage1_static.wbt to feed FDM packets" >&2
     tail -20 "$ARDU_LOG" >&2 || true
     exit 1
 fi

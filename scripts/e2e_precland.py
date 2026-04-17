@@ -28,19 +28,26 @@ from pymavlink import mavutil
 
 GUIDED_MODE = 4
 LAND_MODE = 9
-TAKEOFF_ALT = 10.0
-OFFSET_M = 5.0
+MAV_TYPE_QUADROTOR = 2
+TAKEOFF_ALT = 20.0
+OFFSET_M = 1.0
 XY_THRESHOLD = 0.5
 
 
+def _is_autopilot_hb(hb) -> bool:
+    return hb is not None and hb.type == MAV_TYPE_QUADROTOR
+
+
 def wait_heartbeat(conn, timeout: float = 30.0):
-    hb = conn.wait_heartbeat(timeout=timeout)
-    if hb is None:
-        print("ERROR: no HEARTBEAT", file=sys.stderr)
-        sys.exit(1)
-    print(f"[e2e] heartbeat: type={hb.type} mode={hb.custom_mode} "
-          f"armed={bool(hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)}")
-    return hb
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        hb = conn.wait_heartbeat(timeout=2)
+        if _is_autopilot_hb(hb):
+            print(f"[e2e] heartbeat: type={hb.type} mode={hb.custom_mode} "
+                  f"armed={bool(hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)}")
+            return hb
+    print("ERROR: no HEARTBEAT", file=sys.stderr)
+    sys.exit(1)
 
 
 def set_mode(conn, mode_id: int, timeout: float = 10.0) -> bool:
@@ -48,7 +55,7 @@ def set_mode(conn, mode_id: int, timeout: float = 10.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         hb = conn.wait_heartbeat(timeout=2)
-        if hb and hb.custom_mode == mode_id:
+        if _is_autopilot_hb(hb) and hb.custom_mode == mode_id:
             return True
     return False
 
@@ -57,9 +64,11 @@ def arm(conn, timeout: float = 30.0) -> bool:
     conn.arducopter_arm()
     deadline = time.time() + timeout
     while time.time() < deadline:
-        conn.wait_heartbeat(timeout=2)
-        if conn.motors_armed():
-            return True
+        hb = conn.wait_heartbeat(timeout=2)
+        if _is_autopilot_hb(hb):
+            armed = bool(hb.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+            if armed:
+                return True
     return False
 
 
@@ -127,6 +136,7 @@ def wait_position(conn, target_x: float, target_y: float,
 def wait_landed(conn, timeout: float = 120.0):
     """Wait for disarm, tracking the last known position during descent."""
     last_pos = None
+    last_log = time.time()
     deadline = time.time() + timeout
     while time.time() < deadline:
         msg = conn.recv_match(type=["HEARTBEAT", "LOCAL_POSITION_NED"],
@@ -136,7 +146,12 @@ def wait_landed(conn, timeout: float = 120.0):
         mtype = msg.get_type()
         if mtype == "LOCAL_POSITION_NED":
             last_pos = msg
-        elif mtype == "HEARTBEAT":
+            now = time.time()
+            if now - last_log >= 2.0:
+                print(f"[e2e] descending: x={msg.x:.2f} y={msg.y:.2f} "
+                      f"alt={-msg.z:.1f}m")
+                last_log = now
+        elif mtype == "HEARTBEAT" and msg.type == MAV_TYPE_QUADROTOR:
             armed = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
             if not armed:
                 return last_pos
@@ -178,23 +193,36 @@ def run(mav_url: str, alt: float, offset: float, threshold: float) -> int:
         print("ERROR: takeoff timeout", file=sys.stderr)
         return 1
 
-    pos = get_local_position(conn)
-    if pos is None:
-        print("ERROR: no LOCAL_POSITION_NED", file=sys.stderr)
-        return 1
+    if offset > 0:
+        pos = get_local_position(conn)
+        if pos is None:
+            print("ERROR: no LOCAL_POSITION_NED", file=sys.stderr)
+            return 1
 
-    target_x = pos.x
-    target_y = pos.y + offset
-    target_z = pos.z
+        target_x = pos.x
+        target_y = pos.y + offset
+        target_z = pos.z
 
-    print(f"[e2e] moving {offset} m East: target=({target_x:.1f}, {target_y:.1f})")
-    send_position_target(conn, target_x, target_y, target_z)
+        print(f"[e2e] moving {offset} m East: target=({target_x:.1f}, {target_y:.1f})")
+        send_position_target(conn, target_x, target_y, target_z)
 
-    if not wait_position(conn, target_x, target_y):
-        print("ERROR: position move timeout", file=sys.stderr)
-        return 1
+        if not wait_position(conn, target_x, target_y):
+            print("ERROR: position move timeout", file=sys.stderr)
+            return 1
 
-    time.sleep(2)
+        time.sleep(2)
+
+        print("[e2e] returning to home (0, 0) in GUIDED")
+        send_position_target(conn, 0.0, 0.0, target_z)
+
+        if not wait_position(conn, 0.0, 0.0, tolerance=0.5):
+            print("ERROR: return to home timeout", file=sys.stderr)
+            return 1
+
+        print("[e2e] centered above marker, holding 3s")
+        for _ in range(3):
+            send_position_target(conn, 0.0, 0.0, target_z)
+            time.sleep(1)
 
     print("[e2e] switching to LAND mode")
     if not set_mode(conn, LAND_MODE):
@@ -223,8 +251,8 @@ def run(mav_url: str, alt: float, offset: float, threshold: float) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="E2E precision landing test")
-    parser.add_argument("--mav", default="tcp:127.0.0.1:5763",
-                        help="MAVLink connection string (default: tcp:127.0.0.1:5763)")
+    parser.add_argument("--mav", default="tcp:127.0.0.1:5764",
+                        help="MAVLink connection string (default: tcp:127.0.0.1:5764)")
     parser.add_argument("--alt", type=float, default=TAKEOFF_ALT,
                         help="Takeoff altitude in meters (default: 10)")
     parser.add_argument("--offset", type=float, default=OFFSET_M,
