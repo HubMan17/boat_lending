@@ -21,7 +21,9 @@
 #   WIN_IP         Windows host IP     (default: WSL default-route gateway)
 #   JSON_PORT      Webots UDP ctrl in  (default: 9002)
 #   GCS_PORT       UDP port for MP     (default: 14550)
-#   DEFAULTS       params file         (default: <repo>/params/iris.parm)
+#   DEFAULTS       base params file    (default: <repo>/params/iris.parm)
+#   EXTRA_DEFAULTS comma-separated extra param files layered on top of DEFAULTS
+#                  (default: empty; example: params/precland_copter.parm)
 #   LOG_DIR        arducopter log dir  (default: /tmp)
 set -euo pipefail
 
@@ -33,6 +35,7 @@ WIN_IP="${WIN_IP:-$(ip route show | awk '/^default/ {print $3; exit}')}"
 JSON_PORT="${JSON_PORT:-9002}"
 GCS_PORT="${GCS_PORT:-14550}"
 DEFAULTS="${DEFAULTS:-$REPO_DIR/params/iris.parm}"
+EXTRA_DEFAULTS="${EXTRA_DEFAULTS:-}"
 LOG_DIR="${LOG_DIR:-/tmp}"
 
 if [[ -z "$WIN_IP" ]]; then
@@ -49,6 +52,19 @@ fi
 if [[ ! -f "$DEFAULTS" ]]; then
     echo "ERROR: defaults file missing: $DEFAULTS" >&2
     exit 1
+fi
+
+if [[ -n "$EXTRA_DEFAULTS" ]]; then
+    IFS=',' read -ra _extras <<< "$EXTRA_DEFAULTS"
+    for _f in "${_extras[@]}"; do
+        _abs="$_f"
+        [[ "$_f" != /* ]] && _abs="$REPO_DIR/$_f"
+        if [[ ! -f "$_abs" ]]; then
+            echo "ERROR: extra defaults file missing: $_abs" >&2
+            exit 1
+        fi
+        DEFAULTS="$DEFAULTS,$_abs"
+    done
 fi
 
 BRIDGE="$SCRIPT_DIR/sitl_udp_bridge.py"
