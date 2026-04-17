@@ -2,6 +2,7 @@
 
 Reads camera frames, detects ArUco markers, and sends
 LANDING_TARGET + DISTANCE_SENSOR to ArduCopter SITL.
+Stage 2 adds optical flow for GPS-denied EKF velocity.
 """
 
 import argparse
@@ -12,10 +13,12 @@ import time
 from camera_receive import CameraReceiver
 from detector import ArucoDetector
 from mavlink_sender import MavlinkSender
+from optical_flow import OpticalFlow
 
 TARGET_HZ = 20
 TARGET_DT = 1.0 / TARGET_HZ
 HEARTBEAT_INTERVAL = 1.0
+DEFAULT_ALT = 1.0
 
 _stop_event = threading.Event()
 
@@ -27,6 +30,8 @@ def run(stage: int, cam_host: str, cam_port: int,
         stop = _stop_event
 
     detector = ArucoDetector()
+    flow = OpticalFlow() if stage >= 2 else None
+    last_alt = DEFAULT_ALT
 
     with CameraReceiver(cam_host, cam_port) as cam, \
          MavlinkSender(mav_url) as mav:
@@ -37,6 +42,7 @@ def run(stage: int, cam_host: str, cam_port: int,
         last_hb = 0.0
         frame_count = 0
         detect_count = 0
+        flow_count = 0
 
         while not stop.is_set():
             t0 = time.monotonic()
@@ -47,13 +53,24 @@ def run(stage: int, cam_host: str, cam_port: int,
                 print("companion: camera stream closed")
                 break
 
+            if flow is not None:
+                alt = mav.recv_altitude()
+                if alt is not None and alt > 0.1:
+                    last_alt = alt
+                flow_result = flow.process(frame, last_alt)
+                if flow_result is not None:
+                    mav.send_optical_flow(flow_result)
+                    mav.send_distance_sensor(last_alt)
+                    flow_count += 1
+
             detections = detector.detect(frame)
 
             for det in detections:
                 if det.marker_id != marker_id:
                     continue
                 mav.send_landing_target(det)
-                mav.send_distance_sensor(det.distance)
+                if flow is None:
+                    mav.send_distance_sensor(det.distance)
                 detect_count += 1
                 if detect_count % 10 == 1:
                     print(f"  det: ax={det.angle_x:.3f} ay={det.angle_y:.3f} "
@@ -68,8 +85,10 @@ def run(stage: int, cam_host: str, cam_port: int,
 
             frame_count += 1
             if frame_count % 100 == 0:
+                alt_info = f" alt={last_alt:.1f}" if flow is not None else ""
                 print(f"companion: frames={frame_count} "
-                      f"detections={detect_count}")
+                      f"detections={detect_count} flow={flow_count}"
+                      f"{alt_info}")
 
             elapsed = time.monotonic() - t0
             sleep_time = TARGET_DT - elapsed
@@ -77,14 +96,14 @@ def run(stage: int, cam_host: str, cam_port: int,
                 time.sleep(sleep_time)
 
     print(f"companion: stopped. frames={frame_count} "
-          f"detections={detect_count}")
+          f"detections={detect_count} flow={flow_count}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Precision-landing companion computer")
     parser.add_argument("--stage", type=int, default=1,
-                        help="scenario stage (1=static, 2=ship, 3=moving)")
+                        help="scenario stage (1=static precland, 2=GPS-denied optical flow)")
     parser.add_argument("--cam-host", default="127.0.0.1")
     parser.add_argument("--cam-port", type=int, default=5599)
     parser.add_argument("--mav-url", default="tcp:127.0.0.1:5763",
