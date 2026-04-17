@@ -43,6 +43,14 @@ class MavlinkSender:
             source_component=self._source_component,
         )
         self._boot_ms = int(time.monotonic() * 1000)
+        self._request_data_stream()
+
+    def _request_data_stream(self, rate_hz: int = 10) -> None:
+        self._conn.mav.request_data_stream_send(
+            1, 1,
+            mavlink2.MAV_DATA_STREAM_ALL,
+            rate_hz, 1,
+        )
 
     def close(self) -> None:
         if self._conn:
@@ -79,14 +87,16 @@ class MavlinkSender:
 
     def send_optical_flow(self, result: FlowResult) -> None:
         self._conn.mav.optical_flow_send(
-            self._time_boot_ms(),
+            self._time_boot_ms() * 1000,
             0,
             int(result.flow_x * 1e4),
             int(result.flow_y * 1e4),
-            result.flow_rate_x,
-            result.flow_rate_y,
+            result.flow_rate_x * result.ground_distance,
+            result.flow_rate_y * result.ground_distance,
             result.quality,
             result.ground_distance,
+            flow_rate_x=result.flow_rate_x,
+            flow_rate_y=result.flow_rate_y,
         )
 
     def recv_altitude(self) -> float | None:
