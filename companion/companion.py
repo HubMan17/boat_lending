@@ -25,20 +25,29 @@ GUIDED_MODE = 4
 LOITER_MODE = 5
 ACQUIRE_FRAMES = 3
 LOST_FRAMES = 10
+TRACK_MAX_ALT = 15.0
+CLIMB_RATE_THRESHOLD = 0.3
 
 _stop_event = threading.Event()
 
 
 def run(stage: int, cam_host: str, cam_port: int,
         mav_url: str, marker_id: int,
+        track_max_alt: float = TRACK_MAX_ALT,
+        track_enabled: threading.Event | None = None,
         stop: threading.Event | None = None) -> None:
     if stop is None:
         stop = _stop_event
+    if track_enabled is None:
+        track_enabled = threading.Event()
 
     detector = ArucoDetector()
     flow = OpticalFlow() if stage >= 2 else None
     tracker = TargetTracker() if stage >= 2 else None
     last_alt = DEFAULT_ALT
+    prev_alt = DEFAULT_ALT
+    prev_alt_time: float | None = None
+    climb_rate = 0.0
 
     with CameraReceiver(cam_host, cam_port) as cam, \
          MavlinkSender(mav_url) as mav:
@@ -67,6 +76,13 @@ def run(stage: int, cam_host: str, cam_port: int,
             if flow is not None:
                 alt = mav.recv_altitude()
                 if alt is not None and alt > 0.1:
+                    now_alt = time.monotonic()
+                    if prev_alt_time is not None:
+                        dt_alt = now_alt - prev_alt_time
+                        if dt_alt > 0.01:
+                            climb_rate = (alt - prev_alt) / dt_alt
+                    prev_alt = alt
+                    prev_alt_time = now_alt
                     last_alt = alt
                 flow_result = flow.process(frame, last_alt)
                 if flow_result is not None:
@@ -99,12 +115,17 @@ def run(stage: int, cam_host: str, cam_port: int,
                           f"by={target_det.y_body:.2f} "
                           f"bz={target_det.z_body:.2f}")
 
-                if tracker is not None:
+                still_climbing = climb_rate > CLIMB_RATE_THRESHOLD
+                if (tracker is not None and track_enabled.is_set()
+                        and last_alt <= track_max_alt and not still_climbing):
                     if not tracking_active and consecutive_detect >= ACQUIRE_FRAMES:
-                        mav.set_mode(GUIDED_MODE)
+                        current = mav.get_mode()
+                        if current is None or current != GUIDED_MODE:
+                            mav.set_mode(GUIDED_MODE)
                         tracker.reset()
                         tracking_active = True
-                        print("companion: marker acquired -> GUIDED")
+                        print(f"companion: marker acquired -> GUIDED "
+                              f"(alt={last_alt:.1f})")
 
                     if tracking_active:
                         cmd = tracker.update(target_det)
@@ -116,10 +137,14 @@ def run(stage: int, cam_host: str, cam_port: int,
 
                 if tracker is not None and tracking_active:
                     if consecutive_lost >= LOST_FRAMES:
-                        mav.set_mode(LOITER_MODE)
                         tracker.reset()
                         tracking_active = False
                         print("companion: marker lost -> LOITER")
+
+            if tracking_active and not track_enabled.is_set():
+                tracker.reset()
+                tracking_active = False
+                print("companion: tracking paused")
 
             now = time.monotonic()
             if now - last_hb >= HEARTBEAT_INTERVAL:
@@ -128,7 +153,7 @@ def run(stage: int, cam_host: str, cam_port: int,
 
             frame_count += 1
             if frame_count % 100 == 0:
-                alt_info = f" alt={last_alt:.1f}" if flow is not None else ""
+                alt_info = f" alt={last_alt:.1f} vz={climb_rate:.1f}" if flow is not None else ""
                 track_info = f" track={track_count}" if tracker else ""
                 mode_info = " GUIDED" if tracking_active else " LOITER"
                 print(f"companion: frames={frame_count} "
@@ -155,7 +180,16 @@ def main() -> None:
     parser.add_argument("--mav-url", default="tcp:127.0.0.1:5763",
                         help="MAVLink connection URL (default: tcp:127.0.0.1:5763)")
     parser.add_argument("--marker-id", type=int, default=0)
+    parser.add_argument("--track", action="store_true",
+                        help="Enable PID tracker (default: off)")
+    parser.add_argument("--track-max-alt", type=float, default=TRACK_MAX_ALT,
+                        help="Max altitude for tracking (default: 15)")
     args = parser.parse_args()
+
+    te = None
+    if args.track:
+        te = threading.Event()
+        te.set()
 
     def on_signal(_sig, _frame):
         _stop_event.set()
@@ -164,7 +198,8 @@ def main() -> None:
     signal.signal(signal.SIGTERM, on_signal)
 
     run(args.stage, args.cam_host, args.cam_port,
-        args.mav_url, args.marker_id)
+        args.mav_url, args.marker_id, args.track_max_alt,
+        track_enabled=te)
 
 
 if __name__ == "__main__":

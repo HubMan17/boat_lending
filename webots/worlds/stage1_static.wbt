@@ -70,6 +70,7 @@ DEF IRIS Iris {
   extensionSlot [
     Camera {
       translation 0 0 -0.08
+      rotation 0 1 0 1.5707963
       width 640
       height 480
       name "camera"

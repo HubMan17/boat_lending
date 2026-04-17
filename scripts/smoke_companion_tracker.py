@@ -128,11 +128,13 @@ def main():
     mav_thread.start()
     mav_ready.wait(timeout=3.0)
 
+    track_en = threading.Event()
+    track_en.set()
     stop = threading.Event()
     companion_thread = threading.Thread(
         target=run,
         args=(2, "127.0.0.1", CAM_PORT, f"udpout:127.0.0.1:{MAV_PORT}", 0),
-        kwargs={"stop": stop},
+        kwargs={"track_max_alt": 999.0, "track_enabled": track_en, "stop": stop},
         daemon=True,
     )
     companion_thread.start()

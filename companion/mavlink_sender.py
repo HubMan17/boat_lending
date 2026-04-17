@@ -110,7 +110,7 @@ class MavlinkSender:
 
     def send_velocity(self, cmd: VelocityCommand) -> None:
         type_mask = (
-            0b0000_1101_1100_0111
+            0b0000_1101_1110_0111
         )
         self._conn.mav.set_position_target_local_ned_send(
             self._time_boot_ms(),
@@ -118,7 +118,7 @@ class MavlinkSender:
             mavlink2.MAV_FRAME_BODY_NED,
             type_mask,
             0, 0, 0,
-            cmd.vx, cmd.vy, cmd.vz,
+            cmd.vx, cmd.vy, 0,
             0, 0, 0,
             0, 0,
         )
