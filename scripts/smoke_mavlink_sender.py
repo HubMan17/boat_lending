@@ -55,7 +55,7 @@ def test_heartbeat():
     sock.bind(("127.0.0.1", LISTEN_PORT))
 
     try:
-        sender = MavlinkSender("127.0.0.1", LISTEN_PORT)
+        sender = MavlinkSender(f"udpout:127.0.0.1:{LISTEN_PORT}")
         sender.connect()
         for _ in range(3):
             sender.send_heartbeat()
@@ -88,7 +88,7 @@ def test_landing_target():
             y_body=-0.18,
             z_body=3.48,
         )
-        sender = MavlinkSender("127.0.0.1", LISTEN_PORT + 1)
+        sender = MavlinkSender(f"udpout:127.0.0.1:{LISTEN_PORT + 1}")
         sender.connect()
         for _ in range(3):
             sender.send_landing_target(det)
@@ -121,7 +121,7 @@ def test_distance_sensor():
     sock.bind(("127.0.0.1", LISTEN_PORT + 2))
 
     try:
-        sender = MavlinkSender("127.0.0.1", LISTEN_PORT + 2)
+        sender = MavlinkSender(f"udpout:127.0.0.1:{LISTEN_PORT + 2}")
         sender.connect()
         for _ in range(3):
             sender.send_distance_sensor(5.0)

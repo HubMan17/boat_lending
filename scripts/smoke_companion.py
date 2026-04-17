@@ -98,7 +98,7 @@ def main():
     stop = threading.Event()
     companion_thread = threading.Thread(
         target=run,
-        args=(1, "127.0.0.1", CAM_PORT, "127.0.0.1", MAV_PORT, 0),
+        args=(1, "127.0.0.1", CAM_PORT, f"udpout:127.0.0.1:{MAV_PORT}", 0),
         kwargs={"stop": stop},
         daemon=True,
     )

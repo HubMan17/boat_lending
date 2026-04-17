@@ -21,7 +21,7 @@ _stop_event = threading.Event()
 
 
 def run(stage: int, cam_host: str, cam_port: int,
-        mav_host: str, mav_port: int, marker_id: int,
+        mav_url: str, marker_id: int,
         stop: threading.Event | None = None) -> None:
     if stop is None:
         stop = _stop_event
@@ -29,10 +29,10 @@ def run(stage: int, cam_host: str, cam_port: int,
     detector = ArucoDetector()
 
     with CameraReceiver(cam_host, cam_port) as cam, \
-         MavlinkSender(mav_host, mav_port) as mav:
+         MavlinkSender(mav_url) as mav:
 
         print(f"companion: stage={stage} cam={cam_host}:{cam_port} "
-              f"mav={mav_host}:{mav_port} marker_id={marker_id}")
+              f"mav={mav_url} marker_id={marker_id}")
 
         last_hb = 0.0
         frame_count = 0
@@ -55,6 +55,11 @@ def run(stage: int, cam_host: str, cam_port: int,
                 mav.send_landing_target(det)
                 mav.send_distance_sensor(det.distance)
                 detect_count += 1
+                if detect_count % 10 == 1:
+                    print(f"  det: ax={det.angle_x:.3f} ay={det.angle_y:.3f} "
+                          f"d={det.distance:.1f} "
+                          f"bx={det.x_body:.2f} by={det.y_body:.2f} "
+                          f"bz={det.z_body:.2f}")
 
             now = time.monotonic()
             if now - last_hb >= HEARTBEAT_INTERVAL:
@@ -82,8 +87,8 @@ def main() -> None:
                         help="scenario stage (1=static, 2=ship, 3=moving)")
     parser.add_argument("--cam-host", default="127.0.0.1")
     parser.add_argument("--cam-port", type=int, default=5599)
-    parser.add_argument("--mav-host", default="127.0.0.1")
-    parser.add_argument("--mav-port", type=int, default=14551)
+    parser.add_argument("--mav-url", default="tcp:127.0.0.1:5763",
+                        help="MAVLink connection URL (default: tcp:127.0.0.1:5763)")
     parser.add_argument("--marker-id", type=int, default=0)
     args = parser.parse_args()
 
@@ -94,7 +99,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, on_signal)
 
     run(args.stage, args.cam_host, args.cam_port,
-        args.mav_host, args.mav_port, args.marker_id)
+        args.mav_url, args.marker_id)
 
 
 if __name__ == "__main__":
