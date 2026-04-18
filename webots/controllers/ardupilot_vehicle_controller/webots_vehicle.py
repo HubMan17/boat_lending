@@ -48,6 +48,7 @@ class WebotsArduVehicle():
 
     def __init__(self,
                  motor_names: List[str],
+                 motor_offset: int = 0,
                  accel_name: str = "accelerometer",
                  imu_name: str = "inertial unit",
                  gyro_name: str = "gyro",
@@ -92,6 +93,7 @@ class WebotsArduVehicle():
         """
         # init class variables
         self.motor_velocity_cap = motor_velocity_cap
+        self._motor_offset = motor_offset
         self._instance = instance
         self._reversed_motors = reversed_motors
         self._bidirectional_motors = bidirectional_motors
@@ -243,7 +245,7 @@ class WebotsArduVehicle():
         """
 
         # get only the number of motors we have
-        command_motors = command[:len(self._motors)]
+        command_motors = command[self._motor_offset:self._motor_offset + len(self._motors)]
         if -1 in command_motors:
             print(f"Warning: SITL provided {command.index(-1)} motors "
                   f"but model specifies {len(self._motors)} (I{self._instance})")

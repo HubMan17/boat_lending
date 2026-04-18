@@ -30,6 +30,11 @@ def get_args():
                         type=bool,
                         default=True,
                         help="Whether the vehicle uses propellers. This is important as we need to linearize thrust if so")
+    parser.add_argument("--motor-offset",
+                        type=int,
+                        default=0,
+                        help="Index offset into the SITL command array for the first motor "
+                             "(eg 4 for QuadPlane where SERVO5-8 are copter motors)")
     parser.add_argument("--motor-cap",
                         type=float,
                         default=float('inf'),
@@ -103,6 +108,7 @@ if __name__ == "__main__":
         reversed_motors = []
 
     vehicle = WebotsArduVehicle(motor_names=motors,
+                                motor_offset=args.motor_offset,
                                 reversed_motors=reversed_motors,
                                 accel_name=args.accel,
                                 imu_name=args.imu,

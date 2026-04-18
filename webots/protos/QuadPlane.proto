@@ -1,0 +1,356 @@
+# VRML_SIM R2023a utf8
+# QuadPlane VTOL model: 4 copter motors (Quad-X) + 1 pusher.
+# Built with Webots primitives (Box/Cylinder), no DAE meshes for airframe.
+# Phase 3 — Q-mode only (hover/land), no aerodynamic lift/drag.
+
+PROTO QuadPlane [
+  field  SFVec3f     translation     0 0 0
+  field  SFRotation  rotation        0 0 1 0
+  field  SFString    name            "QuadPlane"
+  field  SFString    controller      "void"
+  field  MFString    controllerArgs  []
+  field  SFString    customData      ""
+  field  SFBool      supervisor      FALSE
+  field  SFBool      synchronization TRUE
+  field  MFNode      extensionSlot   []
+]
+{
+  Robot {
+    translation IS translation
+    rotation IS rotation
+    controller IS controller
+    controllerArgs IS controllerArgs
+    customData IS customData
+    supervisor IS supervisor
+    synchronization IS synchronization
+    name IS name
+    children [
+      Group {
+        children IS extensionSlot
+      }
+
+      # --- Fuselage ---
+      DEF FUSELAGE Transform {
+        children [
+          Shape {
+            appearance DEF BODY_APP PBRAppearance {
+              baseColor 0.15 0.15 0.15
+              roughness 0.9
+              metalness 0.2
+            }
+            geometry Box {
+              size 0.80 0.25 0.15
+            }
+          }
+        ]
+      }
+
+      # --- Wings ---
+      DEF WING_RIGHT Transform {
+        translation 0 -0.625 0.02
+        children [
+          Shape {
+            appearance DEF WING_APP PBRAppearance {
+              baseColor 0.2 0.2 0.2
+              roughness 0.8
+              metalness 0.1
+            }
+            geometry Box {
+              size 0.25 1.0 0.02
+            }
+          }
+        ]
+      }
+      DEF WING_LEFT Transform {
+        translation 0 0.625 0.02
+        children [
+          Shape {
+            appearance USE WING_APP
+            geometry Box {
+              size 0.25 1.0 0.02
+            }
+          }
+        ]
+      }
+
+      # --- Tail boom ---
+      DEF TAIL_BOOM Transform {
+        translation -0.55 0 0
+        rotation 0 0 1 1.5708
+        children [
+          Shape {
+            appearance USE BODY_APP
+            geometry Cylinder {
+              height 0.50
+              radius 0.025
+            }
+          }
+        ]
+      }
+
+      # --- V-tail fins ---
+      DEF VTAIL_RIGHT Transform {
+        translation -0.78 -0.08 0.06
+        rotation 1 0 0 -0.3
+        children [
+          Shape {
+            appearance USE WING_APP
+            geometry Box {
+              size 0.15 0.12 0.015
+            }
+          }
+        ]
+      }
+      DEF VTAIL_LEFT Transform {
+        translation -0.78 0.08 0.06
+        rotation 1 0 0 0.3
+        children [
+          Shape {
+            appearance USE WING_APP
+            geometry Box {
+              size 0.15 0.12 0.015
+            }
+          }
+        ]
+      }
+
+      # --- Motor 1: Front-Right (SERVO5, CCW) ---
+      Propeller {
+        shaftAxis 0 0 1
+        centerOfThrust 0.40 -0.50 0.05
+        thrustConstants 0.004 0
+        torqueConstants 1.5e-03 0
+        device RotationalMotor {
+          name "m1_motor"
+          maxVelocity 100
+          maxTorque 30
+          multiplier 1
+        }
+        slowHelix Solid {
+          translation 0.40 -0.50 0.05
+          children [
+            Shape {
+              appearance DEF PROP_BLUE PBRAppearance {
+                baseColor 0 0 0.75
+                metalness 0.3
+              }
+              geometry DEF CCW_PROP Mesh {
+                url [
+                  "meshes/iris_prop_ccw.dae"
+                ]
+              }
+            }
+          ]
+        }
+      }
+
+      # --- Motor 2: Rear-Left (SERVO6, CCW) ---
+      Propeller {
+        shaftAxis 0 0 1
+        centerOfThrust -0.40 0.50 0.05
+        thrustConstants 0.004 0
+        torqueConstants 1.5e-03 0
+        device RotationalMotor {
+          name "m2_motor"
+          maxVelocity 100
+          maxTorque 30
+          multiplier 1
+        }
+        slowHelix Solid {
+          translation -0.40 0.50 0.05
+          children [
+            Shape {
+              appearance DEF PROP_BLACK PBRAppearance {
+                baseColor 0 0 0
+                metalness 0.3
+              }
+              geometry USE CCW_PROP
+            }
+          ]
+        }
+      }
+
+      # --- Motor 3: Front-Left (SERVO7, CW) ---
+      Propeller {
+        shaftAxis 0 0 1
+        centerOfThrust 0.40 0.50 0.05
+        thrustConstants -0.004 0
+        torqueConstants 1.5e-03 0
+        device RotationalMotor {
+          name "m3_motor"
+          maxVelocity 100
+          maxTorque 30
+          multiplier -1
+        }
+        slowHelix Solid {
+          translation 0.40 0.50 0.05
+          children [
+            Shape {
+              appearance USE PROP_BLUE
+              geometry DEF CW_PROP Mesh {
+                url [
+                  "meshes/iris_prop_cw.dae"
+                ]
+              }
+            }
+          ]
+        }
+      }
+
+      # --- Motor 4: Rear-Right (SERVO8, CW) ---
+      Propeller {
+        shaftAxis 0 0 1
+        centerOfThrust -0.40 -0.50 0.05
+        thrustConstants -0.004 0
+        torqueConstants 1.5e-03 0
+        device RotationalMotor {
+          name "m4_motor"
+          maxVelocity 100
+          maxTorque 30
+          multiplier -1
+        }
+        slowHelix Solid {
+          translation -0.40 -0.50 0.05
+          children [
+            Shape {
+              appearance USE PROP_BLACK
+              geometry USE CW_PROP
+            }
+          ]
+        }
+      }
+
+      # --- Motor 5: Pusher (SERVO9, rear-facing) ---
+      Propeller {
+        shaftAxis 0 -1 0
+        centerOfThrust -0.50 0.00 0.00
+        thrustConstants 0.003 0
+        torqueConstants 1.0e-03 0
+        device RotationalMotor {
+          name "m5_motor"
+          maxVelocity 100
+          maxTorque 30
+          multiplier 1
+        }
+        slowHelix Solid {
+          translation -0.50 0.00 0.00
+          children [
+            Shape {
+              appearance USE PROP_BLACK
+              geometry USE CCW_PROP
+            }
+          ]
+        }
+      }
+
+      # --- Sensors ---
+      Accelerometer {
+      }
+      GPS {
+      }
+      Gyro {
+      }
+      InertialUnit {
+      }
+
+      # --- Landing legs ---
+      DEF LEG_GROUP Group {
+        children [
+          DEF LEG_FL Transform {
+            translation 0.35 -0.45 -0.15
+            children [
+              Shape {
+                appearance DEF LEG_APPEARANCE PBRAppearance {
+                  baseColor 0.05 0.05 0.05
+                  metalness 0.2
+                  roughness 0.8
+                }
+                geometry DEF LEG_GEOM Cylinder {
+                  height 0.15
+                  radius 0.01
+                }
+              }
+            ]
+          }
+          DEF LEG_FR Transform {
+            translation 0.35 0.45 -0.15
+            children [
+              Shape {
+                appearance USE LEG_APPEARANCE
+                geometry USE LEG_GEOM
+              }
+            ]
+          }
+          DEF LEG_RL Transform {
+            translation -0.35 -0.45 -0.15
+            children [
+              Shape {
+                appearance USE LEG_APPEARANCE
+                geometry USE LEG_GEOM
+              }
+            ]
+          }
+          DEF LEG_RR Transform {
+            translation -0.35 0.45 -0.15
+            children [
+              Shape {
+                appearance USE LEG_APPEARANCE
+                geometry USE LEG_GEOM
+              }
+            ]
+          }
+        ]
+      }
+    ]
+
+    boundingObject Group {
+      children [
+        Box {
+          size 0.85 0.30 0.18
+        }
+        # Wing bounding (simplified single box)
+        Transform {
+          translation 0 0 0.02
+          children [
+            Box {
+              size 0.25 2.25 0.02
+            }
+          ]
+        }
+        Transform {
+          translation 0.35 -0.45 -0.15
+          children [
+            Cylinder { height 0.15 radius 0.01 }
+          ]
+        }
+        Transform {
+          translation 0.35 0.45 -0.15
+          children [
+            Cylinder { height 0.15 radius 0.01 }
+          ]
+        }
+        Transform {
+          translation -0.35 -0.45 -0.15
+          children [
+            Cylinder { height 0.15 radius 0.01 }
+          ]
+        }
+        Transform {
+          translation -0.35 0.45 -0.15
+          children [
+            Cylinder { height 0.15 radius 0.01 }
+          ]
+        }
+      ]
+    }
+    physics Physics {
+      density -1
+      mass 4.0
+      centerOfMass [ 0.0 0.0 0.0 ]
+      inertiaMatrix [
+        1.0e-01 1.2e-01 2.0e-01
+        0.0e+00 0.0e+00 0.0e+00
+      ]
+    }
+  }
+}
