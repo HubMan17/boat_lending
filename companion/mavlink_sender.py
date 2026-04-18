@@ -110,7 +110,7 @@ class MavlinkSender:
 
     def send_velocity(self, cmd: VelocityCommand) -> None:
         type_mask = (
-            0b0000_1101_1100_0111
+            0b0000_1101_1110_0111
         )
         self._conn.mav.set_position_target_local_ned_send(
             self._time_boot_ms(),
@@ -118,10 +118,21 @@ class MavlinkSender:
             mavlink2.MAV_FRAME_BODY_NED,
             type_mask,
             0, 0, 0,
-            cmd.vx, cmd.vy, cmd.vz,
+            cmd.vx, cmd.vy, 0,
             0, 0, 0,
             0, 0,
         )
+
+    def set_mode(self, mode_id: int) -> None:
+        self._conn.set_mode(mode_id)
+
+    def get_mode(self) -> int | None:
+        hb = self._conn.recv_match(type="HEARTBEAT", blocking=False)
+        while hb is not None:
+            if hb.type == mavlink2.MAV_TYPE_QUADROTOR:
+                self._last_mode = hb.custom_mode
+            hb = self._conn.recv_match(type="HEARTBEAT", blocking=False)
+        return getattr(self, "_last_mode", None)
 
     def send_distance_sensor(self, distance_m: float) -> None:
         dist_cm = max(1, min(int(distance_m * 100), 12000))

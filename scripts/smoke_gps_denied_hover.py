@@ -30,9 +30,9 @@ FLOWHOLD_MODE = 22
 LAND_MODE = 9
 MAV_TYPE_QUADROTOR = 2
 
-TAKEOFF_ALT = 10.0
-HOVER_DURATION = 30.0
-MOVE_SPEED = 0.5
+TAKEOFF_ALT = 20.0
+HOVER_DURATION = 15
+MOVE_SPEED = 1
 DRIFT_THRESHOLD = 1.0
 
 
@@ -306,7 +306,7 @@ def main() -> int:
     parser.add_argument("--mav", default="tcp:127.0.0.1:5764",
                         help="MAVLink connection (default: tcp:127.0.0.1:5764)")
     parser.add_argument("--alt", type=float, default=TAKEOFF_ALT,
-                        help="Takeoff altitude (default: 10)")
+                        help="Takeoff altitude (default: 20)")
     parser.add_argument("--duration", type=float, default=HOVER_DURATION,
                         help="Hover duration in seconds (default: 30)")
     parser.add_argument("--threshold", type=float, default=DRIFT_THRESHOLD,
