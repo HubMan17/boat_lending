@@ -49,6 +49,7 @@ class MavlinkSender:
         self._last_alt_m: float = 0.0
         self._got_alt: bool = False
         self._last_mode: int | None = None
+        self._mav_type: int | None = None
 
     def connect(self) -> None:
         self._conn = mavutil.mavlink_connection(
@@ -101,8 +102,13 @@ class MavlinkSender:
                 self._last_vel_n = msg.vx
                 self._last_vel_e = msg.vy
             elif t == "HEARTBEAT":
-                if hasattr(msg, 'type') and msg.type == mavlink2.MAV_TYPE_QUADROTOR:
+                if hasattr(msg, 'type') and msg.type in (
+                    mavlink2.MAV_TYPE_QUADROTOR,
+                    mavlink2.MAV_TYPE_FIXED_WING,
+                ):
                     self._last_mode = msg.custom_mode
+                    if self._mav_type is None:
+                        self._mav_type = msg.type
 
     def recv_altitude(self) -> float | None:
         if self._got_alt:
@@ -133,6 +139,14 @@ class MavlinkSender:
     @property
     def yaw_deg(self) -> float:
         return math.degrees(self._last_yaw)
+
+    @property
+    def mav_type(self) -> int | None:
+        return self._mav_type
+
+    @property
+    def is_plane(self) -> bool:
+        return self._mav_type == mavlink2.MAV_TYPE_FIXED_WING
 
     def get_mode(self) -> int | None:
         return self._last_mode

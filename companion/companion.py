@@ -24,8 +24,10 @@ TARGET_DT = 1.0 / TARGET_HZ
 HEARTBEAT_INTERVAL = 1.0
 DEFAULT_ALT = 1.0
 
-GUIDED_MODE = 4
-LAND_MODE = 9
+GUIDED_MODE_COPTER = 4
+LAND_MODE_COPTER = 9
+GUIDED_MODE_PLANE = 15
+QLAND_MODE_PLANE = 20
 ACQUIRE_FRAMES = 3
 LOST_FRAMES = 30
 TRACK_MAX_ALT = 60.0
@@ -70,8 +72,21 @@ def run(stage: int, cam_host: str, cam_port: int,
     with CameraReceiver(cam_host, cam_port) as cam, \
          MavlinkSender(mav_url) as mav:
 
+        deadline_hb = time.monotonic() + 10.0
+        while mav.mav_type is None and time.monotonic() < deadline_hb:
+            mav.drain()
+            time.sleep(0.05)
+
+        if mav.is_plane:
+            guided_mode = GUIDED_MODE_PLANE
+            land_mode = QLAND_MODE_PLANE
+        else:
+            guided_mode = GUIDED_MODE_COPTER
+            land_mode = LAND_MODE_COPTER
+
+        vtype = "ArduPlane" if mav.is_plane else "ArduCopter"
         print(f"companion: stage={stage} cam={cam_host}:{cam_port} "
-              f"mav={mav_url} marker_id={marker_id}")
+              f"mav={mav_url} marker_id={marker_id} vehicle={vtype}")
 
         last_hb = 0.0
         frame_count = 0
@@ -140,11 +155,11 @@ def run(stage: int, cam_host: str, cam_port: int,
                         and last_alt <= track_max_alt and not still_climbing):
                     if not tracking_active and consecutive_detect >= ACQUIRE_FRAMES:
                         current = mav.get_mode()
-                        if current == LAND_MODE:
+                        if current == land_mode:
                             pass
                         else:
-                            if current is None or current != GUIDED_MODE:
-                                mav.set_mode(GUIDED_MODE)
+                            if current is None or current != guided_mode:
+                                mav.set_mode(guided_mode)
                             hold_yaw = mav.heading
                             align_start = None
                             descending = False
@@ -190,7 +205,7 @@ def run(stage: int, cam_host: str, cam_port: int,
                                 drone_x, drone_y, _ = mav.position
                                 print(f"companion: alt {last_alt:.1f}m <= {LAND_ALT}m, switching to LAND"
                                       f" (x={drone_x:.3f} y={drone_y:.3f})")
-                                mav.set_mode(LAND_MODE)
+                                mav.set_mode(land_mode)
                                 result_path = os.path.join(os.path.dirname(__file__),
                                                            "..", "e2e_result.txt")
                                 with open(result_path, "w") as f:
