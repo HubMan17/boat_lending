@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import subprocess
 import sys
 import time
 
@@ -38,6 +39,7 @@ TAKEOFF_ALT = 20.0
 OFFSET_M = 5.0
 XY_THRESHOLD = 0.5
 MOVE_SPEED = 1.0
+APPROACH_SPEED = 1.5
 LANDING_TIMEOUT = 150.0
 
 LOG = "[e2e-gd]"
@@ -181,7 +183,8 @@ def read_result(path: str = RESULT_FILE):
     return None, None
 
 
-def run(mav_url: str, alt: float, offset: float, threshold: float) -> int:
+def run(mav_url: str, alt: float, offset: float, threshold: float,
+        approach: bool = False, approach_speed: float = APPROACH_SPEED) -> int:
     # Phase 1: setup — takeoff and move
     print(f"{LOG} connecting to {mav_url}")
     conn = mavutil.mavlink_connection(mav_url, source_system=255)
@@ -216,23 +219,46 @@ def run(mav_url: str, alt: float, offset: float, threshold: float) -> int:
             print("ERROR: offset move timeout", file=sys.stderr)
             return 1
 
-        print(f"{LOG} stabilizing yaw=0")
-        for _ in range(20):
-            send_velocity(conn, 0, 0, yaw=0.0)
-            time.sleep(0.2)
+        if approach:
+            print(f"{LOG} approach: flying toward marker at {approach_speed} m/s")
+            deadline_app = time.time() + 60.0
+            while time.time() < deadline_app:
+                send_velocity(conn, 0, -approach_speed, yaw=0.0)
+                msg = conn.recv_match(type="LOCAL_POSITION_NED", blocking=True, timeout=0.5)
+                if msg and abs(msg.y) <= 3.0:
+                    print(f"{LOG} near marker zone y={msg.y:.2f}, releasing control")
+                    break
+                if msg and time.time() - deadline_app + 60 > 2:
+                    t = time.time() - (deadline_app - 60)
+                    if int(t) % 2 == 0:
+                        print(f"{LOG} approaching: y={msg.y:.2f} alt={-msg.z:.1f}m")
+            pos = get_local_position(conn)
+            if pos:
+                print(f"{LOG} released at y={pos.y:.2f} vy={pos.vy:.2f} m/s")
+        else:
+            print(f"{LOG} stabilizing yaw=0")
+            for _ in range(20):
+                send_velocity(conn, 0, 0, yaw=0.0)
+                time.sleep(0.2)
 
     # Phase 2: disconnect — companion takes serial2
     conn.close()
 
-    # Phase 3: read result from companion
+    # Phase 3: launch companion automatically
     if os.path.exists(RESULT_FILE):
         os.remove(RESULT_FILE)
 
-    print()
-    print(f"{LOG} === PORT RELEASED === start companion in another terminal:")
-    print(f"{LOG}   companion\\.venv\\Scripts\\python.exe companion/companion.py --stage 2 --track")
-    print()
-    print(f"{LOG} waiting for companion to write result (timeout {LANDING_TIMEOUT}s)...")
+    repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    python = os.path.join(repo_dir, "companion", ".venv", "Scripts", "python.exe")
+    companion_py = os.path.join(repo_dir, "companion", "companion.py")
+    companion_cmd = [python, companion_py, "--stage", "2", "--track",
+                     "--mav-url", mav_url,
+                     "--track-max-alt", str(alt + 10)]
+
+    print(f"{LOG} launching companion automatically...")
+    companion_proc = subprocess.Popen(companion_cmd, cwd=repo_dir)
+    print(f"{LOG} companion PID={companion_proc.pid}")
+    print(f"{LOG} waiting for landing (timeout {LANDING_TIMEOUT}s)...")
 
     deadline = time.time() + LANDING_TIMEOUT
     x, y = None, None
@@ -241,6 +267,12 @@ def run(mav_url: str, alt: float, offset: float, threshold: float) -> int:
         if x is not None:
             break
         time.sleep(2)
+
+    companion_proc.terminate()
+    try:
+        companion_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        companion_proc.kill()
 
     if x is None:
         print("ERROR: companion did not land (no result file)", file=sys.stderr)
@@ -269,8 +301,13 @@ def main() -> int:
                         help="East offset in meters (default: 5)")
     parser.add_argument("--threshold", type=float, default=XY_THRESHOLD,
                         help="Max XY error for PASS (default: 0.5)")
+    parser.add_argument("--approach", action="store_true",
+                        help="Approach mode: fly toward marker with velocity, don't stop")
+    parser.add_argument("--approach-speed", type=float, default=APPROACH_SPEED,
+                        help="Approach speed in m/s (default: 1.5)")
     args = parser.parse_args()
-    return run(args.mav, args.alt, args.offset, args.threshold)
+    return run(args.mav, args.alt, args.offset, args.threshold,
+               approach=args.approach, approach_speed=args.approach_speed)
 
 
 if __name__ == "__main__":
