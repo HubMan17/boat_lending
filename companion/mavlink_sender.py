@@ -4,6 +4,7 @@ Packs and sends LANDING_TARGET, DISTANCE_SENSOR, and companion
 HEARTBEAT to ArduCopter SITL via UDP.
 """
 
+import math
 import os
 import time
 
@@ -36,6 +37,18 @@ class MavlinkSender:
         self._source_component = source_component
         self._conn = None
         self._boot_ms = 0
+        self._last_heading: float = 0.0
+        self._last_roll: float = 0.0
+        self._last_pitch: float = 0.0
+        self._last_yaw: float = 0.0
+        self._last_pos_x: float = 0.0
+        self._last_pos_y: float = 0.0
+        self._last_pos_z: float = 0.0
+        self._last_vel_n: float = 0.0
+        self._last_vel_e: float = 0.0
+        self._last_alt_m: float = 0.0
+        self._got_alt: bool = False
+        self._last_mode: int | None = None
 
     def connect(self) -> None:
         self._conn = mavutil.mavlink_connection(
@@ -60,6 +73,69 @@ class MavlinkSender:
 
     def _time_boot_ms(self) -> int:
         return int(time.monotonic() * 1000) - self._boot_ms
+
+    def drain(self) -> None:
+        """Read ALL pending messages, dispatch by type.
+
+        Must be called once per loop iteration BEFORE accessing any state.
+        Fixes pymavlink issue where recv_match(type=X) consumes messages
+        of other types from the buffer.
+        """
+        while True:
+            msg = self._conn.recv_msg()
+            if msg is None:
+                break
+            t = msg.get_type()
+            if t == "ATTITUDE":
+                self._last_roll = msg.roll
+                self._last_pitch = msg.pitch
+                self._last_yaw = msg.yaw
+                self._last_heading = msg.yaw
+            elif t == "GLOBAL_POSITION_INT":
+                self._last_alt_m = msg.relative_alt / 1000.0
+                self._got_alt = True
+            elif t == "LOCAL_POSITION_NED":
+                self._last_pos_x = msg.x
+                self._last_pos_y = msg.y
+                self._last_pos_z = msg.z
+                self._last_vel_n = msg.vx
+                self._last_vel_e = msg.vy
+            elif t == "HEARTBEAT":
+                if hasattr(msg, 'type') and msg.type == mavlink2.MAV_TYPE_QUADROTOR:
+                    self._last_mode = msg.custom_mode
+
+    def recv_altitude(self) -> float | None:
+        if self._got_alt:
+            self._got_alt = False
+            return self._last_alt_m
+        return None
+
+    @property
+    def position(self) -> tuple[float, float, float]:
+        return self._last_pos_x, self._last_pos_y, self._last_pos_z
+
+    @property
+    def velocity_ned(self) -> tuple[float, float]:
+        return self._last_vel_n, self._last_vel_e
+
+    @property
+    def heading(self) -> float:
+        return self._last_heading
+
+    @property
+    def roll_deg(self) -> float:
+        return math.degrees(self._last_roll)
+
+    @property
+    def pitch_deg(self) -> float:
+        return math.degrees(self._last_pitch)
+
+    @property
+    def yaw_deg(self) -> float:
+        return math.degrees(self._last_yaw)
+
+    def get_mode(self) -> int | None:
+        return self._last_mode
 
     def send_heartbeat(self) -> None:
         self._conn.mav.heartbeat_send(
@@ -100,39 +176,32 @@ class MavlinkSender:
             flow_rate_y=result.flow_rate_y,
         )
 
-    def recv_altitude(self) -> float | None:
-        msg = self._conn.recv_match(
-            type="GLOBAL_POSITION_INT", blocking=False
-        )
-        if msg is None:
-            return None
-        return msg.relative_alt / 1000.0
-
-    def send_velocity(self, cmd: VelocityCommand) -> None:
-        type_mask = (
-            0b0000_1101_1110_0111
-        )
+    def send_velocity_ned(self, vn: float, ve: float, vd: float = 0.0,
+                          yaw: float | None = None) -> None:
+        """Send NED velocity. If yaw is given, hold that heading."""
+        if yaw is not None:
+            type_mask = (
+                0b0000_1001_1100_0111
+                # USE vx vy vz yaw, ignore rest
+            )
+        else:
+            type_mask = (
+                0b0000_1101_1100_0111
+                # USE vx vy vz, ignore yaw/yaw_rate
+            )
         self._conn.mav.set_position_target_local_ned_send(
             self._time_boot_ms(),
             1, 1,
-            mavlink2.MAV_FRAME_BODY_NED,
+            mavlink2.MAV_FRAME_LOCAL_NED,
             type_mask,
             0, 0, 0,
-            cmd.vx, cmd.vy, 0,
+            vn, ve, vd,
             0, 0, 0,
-            0, 0,
+            yaw if yaw is not None else 0, 0,
         )
 
     def set_mode(self, mode_id: int) -> None:
         self._conn.set_mode(mode_id)
-
-    def get_mode(self) -> int | None:
-        hb = self._conn.recv_match(type="HEARTBEAT", blocking=False)
-        while hb is not None:
-            if hb.type == mavlink2.MAV_TYPE_QUADROTOR:
-                self._last_mode = hb.custom_mode
-            hb = self._conn.recv_match(type="HEARTBEAT", blocking=False)
-        return getattr(self, "_last_mode", None)
 
     def send_distance_sensor(self, distance_m: float) -> None:
         dist_cm = max(1, min(int(distance_m * 100), 12000))
