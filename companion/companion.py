@@ -9,6 +9,7 @@ Stage 2: optical flow (EKF velocity) + ArUco pixel tracker.
 
 import argparse
 import math
+import os
 import signal
 import threading
 import time
@@ -30,12 +31,13 @@ LOST_FRAMES = 30
 TRACK_MAX_ALT = 30.0
 CLIMB_RATE_THRESHOLD = 0.3
 
-KP = 0.15
-KD = 0.3
+KP = 0.10
+KD = 0.5
 MAX_VEL = 0.35
 ALIGN_PX = 50
 ALIGN_HOLD_SEC = 3.0
 DESCENT_RATE = 0.3
+LAND_ALT = 2.0
 
 _stop_event = threading.Event()
 
@@ -170,6 +172,8 @@ def run(stage: int, cam_host: str, cam_port: int,
                         cur_vn, cur_ve = mav.velocity_ned
                         vn -= KD * cur_vn
                         ve -= KD * cur_ve
+                        vn = max(-MAX_VEL, min(MAX_VEL, vn))
+                        ve = max(-MAX_VEL, min(MAX_VEL, ve))
 
                         vd = 0.0
                         now = time.monotonic()
@@ -182,6 +186,17 @@ def run(stage: int, cam_host: str, cam_port: int,
                             align_start = None
 
                         if descending:
+                            if last_alt <= LAND_ALT:
+                                drone_x, drone_y, _ = mav.position
+                                print(f"companion: alt {last_alt:.1f}m <= {LAND_ALT}m, switching to LAND"
+                                      f" (x={drone_x:.3f} y={drone_y:.3f})")
+                                mav.set_mode(LAND_MODE)
+                                result_path = os.path.join(os.path.dirname(__file__),
+                                                           "..", "e2e_result.txt")
+                                with open(result_path, "w") as f:
+                                    f.write(f"{drone_x:.4f} {drone_y:.4f} {last_alt:.2f}\n")
+                                tracking_active = False
+                                continue
                             if err_px < ALIGN_PX * 2:
                                 vd = DESCENT_RATE
                             else:
