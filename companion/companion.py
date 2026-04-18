@@ -1,20 +1,22 @@
 """Precision-landing companion main loop.
 
 Stage 1: ArUco detection -> LANDING_TARGET + DISTANCE_SENSOR.
-Stage 2: optical flow (EKF velocity) + ArUco tracker (PID -> velocity cmd),
-         auto-switches LOITER -> GUIDED on marker acquire, back on loss.
+Stage 2: optical flow (EKF velocity) + ArUco pixel tracker.
+         Each frame: pixel error from center -> body velocity -> NED via heading.
+         No accumulated state. Yaw held at heading captured on acquire.
+         Always GUIDED mode — never LOITER in GPS-denied.
 """
 
 import argparse
+import math
 import signal
 import threading
 import time
 
 from camera_receive import CameraReceiver
-from detector import ArucoDetector
+from detector import ArucoDetector, Detection
 from mavlink_sender import MavlinkSender
 from optical_flow import OpticalFlow
-from tracker import TargetTracker
 
 TARGET_HZ = 20
 TARGET_DT = 1.0 / TARGET_HZ
@@ -22,11 +24,18 @@ HEARTBEAT_INTERVAL = 1.0
 DEFAULT_ALT = 1.0
 
 GUIDED_MODE = 4
-LOITER_MODE = 5
+LAND_MODE = 9
 ACQUIRE_FRAMES = 3
-LOST_FRAMES = 10
-TRACK_MAX_ALT = 15.0
+LOST_FRAMES = 30
+TRACK_MAX_ALT = 30.0
 CLIMB_RATE_THRESHOLD = 0.3
+
+KP = 0.15
+KD = 0.3
+MAX_VEL = 0.35
+ALIGN_PX = 50
+ALIGN_HOLD_SEC = 3.0
+DESCENT_RATE = 0.3
 
 _stop_event = threading.Event()
 
@@ -43,11 +52,18 @@ def run(stage: int, cam_host: str, cam_port: int,
 
     detector = ArucoDetector()
     flow = OpticalFlow() if stage >= 2 else None
-    tracker = TargetTracker() if stage >= 2 else None
     last_alt = DEFAULT_ALT
     prev_alt = DEFAULT_ALT
     prev_alt_time: float | None = None
     climb_rate = 0.0
+
+    cm = detector.camera_matrix
+    fx, fy = cm[0, 0], cm[1, 1]
+    cx, cy = cm[0, 2], cm[1, 2]
+
+    hold_yaw: float | None = None
+    align_start: float | None = None
+    descending = False
 
     with CameraReceiver(cam_host, cam_port) as cam, \
          MavlinkSender(mav_url) as mav:
@@ -73,6 +89,8 @@ def run(stage: int, cam_host: str, cam_port: int,
                 print("companion: camera stream closed")
                 break
 
+            mav.drain()
+
             if flow is not None:
                 alt = mav.recv_altitude()
                 if alt is not None and alt > 0.1:
@@ -90,60 +108,118 @@ def run(stage: int, cam_host: str, cam_port: int,
                     mav.send_distance_sensor(last_alt)
                     flow_count += 1
 
-            detections = detector.detect(frame)
+            raw_dets = detector.detect_raw(frame)
 
-            target_det = None
-            for det in detections:
-                if det.marker_id == marker_id:
-                    target_det = det
+            target_raw = None
+            for raw in raw_dets:
+                if raw[0] == marker_id:
+                    target_raw = raw
                     break
 
-            if target_det is not None:
+            found = target_raw is not None
+
+            if found:
+                mid, tx, ty, tz, px, py = target_raw
                 consecutive_detect += 1
                 consecutive_lost = 0
 
                 if flow is None:
-                    mav.send_landing_target(target_det)
-                    mav.send_distance_sensor(target_det.distance)
+                    det_legacy = detector.detect(frame)
+                    for d in det_legacy:
+                        if d.marker_id == marker_id:
+                            mav.send_landing_target(d)
+                            mav.send_distance_sensor(d.distance)
+                            break
 
                 detect_count += 1
-                if detect_count % 10 == 1:
-                    print(f"  det: ax={target_det.angle_x:.3f} "
-                          f"ay={target_det.angle_y:.3f} "
-                          f"d={target_det.distance:.1f} "
-                          f"bx={target_det.x_body:.2f} "
-                          f"by={target_det.y_body:.2f} "
-                          f"bz={target_det.z_body:.2f}")
 
                 still_climbing = climb_rate > CLIMB_RATE_THRESHOLD
-                if (tracker is not None and track_enabled.is_set()
+                if (stage >= 2 and track_enabled.is_set()
                         and last_alt <= track_max_alt and not still_climbing):
                     if not tracking_active and consecutive_detect >= ACQUIRE_FRAMES:
                         current = mav.get_mode()
-                        if current is None or current != GUIDED_MODE:
-                            mav.set_mode(GUIDED_MODE)
-                        tracker.reset()
-                        tracking_active = True
-                        print(f"companion: marker acquired -> GUIDED "
-                              f"(alt={last_alt:.1f})")
+                        if current == LAND_MODE:
+                            pass
+                        else:
+                            if current is None or current != GUIDED_MODE:
+                                mav.set_mode(GUIDED_MODE)
+                            hold_yaw = mav.heading
+                            align_start = None
+                            descending = False
+                            tracking_active = True
+                            print(f"companion: marker acquired -> GUIDED "
+                                  f"(alt={last_alt:.1f} yaw={mav.yaw_deg:.0f}°)")
 
                     if tracking_active:
-                        cmd = tracker.update(target_det)
-                        mav.send_velocity(cmd)
+                        err_px_x = px - cx
+                        err_px_y = py - cy
+                        err_px = math.sqrt(err_px_x**2 + err_px_y**2)
+
+                        body_fwd = (cy - py) / fy * last_alt
+                        body_right = (px - cx) / fx * last_alt
+
+                        vx_body = KP * body_fwd
+                        vy_body = KP * body_right
+                        vx_body = max(-MAX_VEL, min(MAX_VEL, vx_body))
+                        vy_body = max(-MAX_VEL, min(MAX_VEL, vy_body))
+
+                        hdg = mav.heading
+                        vn = vx_body * math.cos(hdg) - vy_body * math.sin(hdg)
+                        ve = vx_body * math.sin(hdg) + vy_body * math.cos(hdg)
+
+                        cur_vn, cur_ve = mav.velocity_ned
+                        vn -= KD * cur_vn
+                        ve -= KD * cur_ve
+
+                        vd = 0.0
+                        now = time.monotonic()
+                        if err_px < ALIGN_PX:
+                            if align_start is None:
+                                align_start = now
+                            elif now - align_start >= ALIGN_HOLD_SEC:
+                                descending = True
+                        else:
+                            align_start = None
+
+                        if descending:
+                            if err_px < ALIGN_PX * 2:
+                                vd = DESCENT_RATE
+                            else:
+                                vd = 0.0
+
+                        state = "DESCENDING" if descending else (
+                            "ALIGNED" if align_start else "ALIGNING")
+
+                        mav.send_velocity_ned(vn, ve, vd, yaw=hold_yaw)
                         track_count += 1
+
+                        if track_count % 5 == 1:
+                            drone_x, drone_y, _ = mav.position
+                            print(f"  trk: px=({px:.0f},{py:.0f}) "
+                                  f"err_px={err_px:.0f} "
+                                  f"body=({vx_body:+.2f},{vy_body:+.2f}) "
+                                  f"ned=({vn:+.2f},{ve:+.2f},{vd:+.2f}) "
+                                  f"drone=({drone_x:+.1f},{drone_y:+.1f}) "
+                                  f"yaw={mav.yaw_deg:.0f}° "
+                                  f"[{state}]")
             else:
                 consecutive_detect = 0
                 consecutive_lost += 1
 
-                if tracker is not None and tracking_active:
+                if tracking_active:
+                    mav.send_velocity_ned(0, 0, 0, yaw=hold_yaw)
+
                     if consecutive_lost >= LOST_FRAMES:
-                        tracker.reset()
                         tracking_active = False
-                        print("companion: marker lost -> LOITER")
+                        align_start = None
+                        descending = False
+                        print(f"companion: marker lost -> hold "
+                              f"(yaw={mav.yaw_deg:.0f}°)")
 
             if tracking_active and not track_enabled.is_set():
-                tracker.reset()
                 tracking_active = False
+                align_start = None
+                descending = False
                 print("companion: tracking paused")
 
             now = time.monotonic()
@@ -154,11 +230,12 @@ def run(stage: int, cam_host: str, cam_port: int,
             frame_count += 1
             if frame_count % 100 == 0:
                 alt_info = f" alt={last_alt:.1f} vz={climb_rate:.1f}" if flow is not None else ""
-                track_info = f" track={track_count}" if tracker else ""
-                mode_info = " GUIDED" if tracking_active else " LOITER"
-                print(f"companion: frames={frame_count} "
-                      f"detections={detect_count} flow={flow_count}"
-                      f"{track_info}{mode_info}{alt_info}")
+                track_info = f" track={track_count}" if stage >= 2 else ""
+                mode_info = " GUIDED" if tracking_active else " HOLD"
+                yaw_info = f" yaw={mav.yaw_deg:.0f}°"
+                det_info = f" det={detect_count}/{frame_count}"
+                print(f"companion: frames={frame_count}{det_info} "
+                      f"flow={flow_count}{track_info}{mode_info}{alt_info}{yaw_info}")
 
             elapsed = time.monotonic() - t0
             sleep_time = TARGET_DT - elapsed
@@ -167,7 +244,7 @@ def run(stage: int, cam_host: str, cam_port: int,
 
     print(f"companion: stopped. frames={frame_count} "
           f"detections={detect_count} flow={flow_count} "
-          f"track={track_count if tracker else 0}")
+          f"track={track_count}")
 
 
 def main() -> None:
@@ -183,7 +260,7 @@ def main() -> None:
     parser.add_argument("--track", action="store_true",
                         help="Enable PID tracker (default: off)")
     parser.add_argument("--track-max-alt", type=float, default=TRACK_MAX_ALT,
-                        help="Max altitude for tracking (default: 15)")
+                        help="Max altitude for tracking (default: 30)")
     args = parser.parse_args()
 
     te = None
