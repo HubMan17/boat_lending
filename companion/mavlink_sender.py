@@ -102,10 +102,13 @@ class MavlinkSender:
                 self._last_vel_n = msg.vx
                 self._last_vel_e = msg.vy
             elif t == "HEARTBEAT":
-                if hasattr(msg, 'type') and msg.type in (
-                    mavlink2.MAV_TYPE_QUADROTOR,
-                    mavlink2.MAV_TYPE_FIXED_WING,
-                ):
+                if (hasattr(msg, 'type') and msg.type in (
+                        mavlink2.MAV_TYPE_QUADROTOR,
+                        mavlink2.MAV_TYPE_FIXED_WING,
+                        mavlink2.MAV_TYPE_VTOL_QUADROTOR,
+                        mavlink2.MAV_TYPE_VTOL_TILTROTOR)
+                        and hasattr(msg, 'autopilot')
+                        and msg.autopilot == mavlink2.MAV_AUTOPILOT_ARDUPILOTMEGA):
                     self._last_mode = msg.custom_mode
                     if self._mav_type is None:
                         self._mav_type = msg.type
@@ -146,7 +149,11 @@ class MavlinkSender:
 
     @property
     def is_plane(self) -> bool:
-        return self._mav_type == mavlink2.MAV_TYPE_FIXED_WING
+        return self._mav_type in (
+            mavlink2.MAV_TYPE_FIXED_WING,
+            mavlink2.MAV_TYPE_VTOL_QUADROTOR,
+            mavlink2.MAV_TYPE_VTOL_TILTROTOR,
+        )
 
     def get_mode(self) -> int | None:
         return self._last_mode
