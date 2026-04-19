@@ -19,6 +19,17 @@ from detector import ArucoDetector, Detection
 from mavlink_sender import MavlinkSender
 from optical_flow import OpticalFlow
 
+CAMERA_BACKENDS = ("tcp", "gstreamer")
+
+
+def _make_camera(backend: str, host: str, port: int):
+    if backend == "tcp":
+        return CameraReceiver(host, port)
+    if backend == "gstreamer":
+        from camera_receive_gst import GStreamerCameraReceiver
+        return GStreamerCameraReceiver(port=port, host=host)
+    raise ValueError(f"unknown camera backend: {backend!r}")
+
 TARGET_HZ = 20
 TARGET_DT = 1.0 / TARGET_HZ
 HEARTBEAT_INTERVAL = 1.0
@@ -48,7 +59,8 @@ def run(stage: int, cam_host: str, cam_port: int,
         mav_url: str, marker_id: int,
         track_max_alt: float = TRACK_MAX_ALT,
         track_enabled: threading.Event | None = None,
-        stop: threading.Event | None = None) -> None:
+        stop: threading.Event | None = None,
+        camera_backend: str = "tcp") -> None:
     if stop is None:
         stop = _stop_event
     if track_enabled is None:
@@ -69,7 +81,7 @@ def run(stage: int, cam_host: str, cam_port: int,
     align_start: float | None = None
     descending = False
 
-    with CameraReceiver(cam_host, cam_port) as cam, \
+    with _make_camera(camera_backend, cam_host, cam_port) as cam, \
          MavlinkSender(mav_url) as mav:
 
         deadline_hb = time.monotonic() + 10.0
@@ -85,7 +97,7 @@ def run(stage: int, cam_host: str, cam_port: int,
             land_mode = LAND_MODE_COPTER
 
         vtype = "ArduPlane" if mav.is_plane else "ArduCopter"
-        print(f"companion: stage={stage} cam={cam_host}:{cam_port} "
+        print(f"companion: stage={stage} cam[{camera_backend}]={cam_host}:{cam_port} "
               f"mav={mav_url} marker_id={marker_id} vehicle={vtype}")
 
         last_hb = 0.0
@@ -283,7 +295,11 @@ def main() -> None:
     parser.add_argument("--stage", type=int, default=1,
                         help="scenario stage (1=static precland, 2=GPS-denied optical flow)")
     parser.add_argument("--cam-host", default="127.0.0.1")
-    parser.add_argument("--cam-port", type=int, default=5599)
+    parser.add_argument("--cam-port", type=int, default=None,
+                        help="camera port (default: 5599 for tcp, 5600 for gstreamer)")
+    parser.add_argument("--camera-backend", choices=CAMERA_BACKENDS, default="tcp",
+                        help="tcp = Webots TCP header+grayscale; "
+                             "gstreamer = Gazebo GstCameraPlugin UDP H.264")
     parser.add_argument("--mav-url", default="tcp:127.0.0.1:5763",
                         help="MAVLink connection URL (default: tcp:127.0.0.1:5763)")
     parser.add_argument("--marker-id", type=int, default=0)
@@ -292,6 +308,9 @@ def main() -> None:
     parser.add_argument("--track-max-alt", type=float, default=TRACK_MAX_ALT,
                         help="Max altitude for tracking (default: 30)")
     args = parser.parse_args()
+
+    if args.cam_port is None:
+        args.cam_port = 5600 if args.camera_backend == "gstreamer" else 5599
 
     te = None
     if args.track:
@@ -306,7 +325,7 @@ def main() -> None:
 
     run(args.stage, args.cam_host, args.cam_port,
         args.mav_url, args.marker_id, args.track_max_alt,
-        track_enabled=te)
+        track_enabled=te, camera_backend=args.camera_backend)
 
 
 if __name__ == "__main__":

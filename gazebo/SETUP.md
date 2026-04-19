@@ -97,16 +97,28 @@ sed -i '0,/<cast_shadows>true</{s|<cast_shadows>true</cast_shadows>|<cast_shadow
 
 Long-term these belong in a repo-hosted world file derived from upstream.
 
-## 6. Running the headless sim + camera viewer
+## 6. Running the full precland bring-up (P3b.3)
+
+`run_iris_sim.sh` is the all-in-one bring-up: headless Gazebo on
+`gazebo/worlds/iris_precland.sdf` (downward camera + 1.5 m ArUco marker) +
+ArduCopter JSON SITL + UDP bridge to Mission Planner on Windows.
 
 ```bash
-bash gazebo/scripts/run_iris_sim.sh   # gz sim -s -r + enable_streaming + gst window
-bash gazebo/scripts/move_iris.sh      # teleport demo to prove camera streams live
-bash gazebo/scripts/stop_sim.sh       # kill all
+bash gazebo/scripts/run_iris_sim.sh             # SITL + Gazebo + MP bridge
+bash gazebo/scripts/run_iris_sim.sh --viewer    # + live H.264 gst viewer
 ```
 
-The gst viewer uses the WSLg display. Verify WSLg first with `xeyes`
-(`sudo apt-get install -y x11-apps` if missing).
+Smoke-test (5/5 PASS on a clean WSL session):
+
+```bash
+bash gazebo/scripts/smoke_precland_bringup.sh
+```
+
+Ports: UDP 9002/9003 (JSON FDM), TCP 5760 (SITL primary), TCP 5763
+(`--serial2`, companion/e2e), UDP 5600 (GstCameraPlugin H.264 RTP), UDP 14550
+(bridge → Mission Planner), UDP 14551 (companion → SITL).
+
+Mission Planner on Windows: connect `UDP 14550` or `TCP 5763` — both work.
 
 ## 7. SITL ↔ Gazebo coupling (P3b.2)
 
@@ -136,14 +148,62 @@ The repo-hosted `gazebo/worlds/iris_coupling.sdf` is a trimmed-down world
 (`iris_with_ardupilot` only, no gimbal, no Fuel downloads) that is the
 canonical environment for P3b.2 / P3b.3 coupling tests.
 
-## 8. Known limitations
+## 8. Companion in WSL (Gazebo-phase only)
+
+Windows PyPI `opencv-python` wheels are built **without** GStreamer
+(`cv2.getBuildInformation()` shows `GStreamer: NO`), so
+`cv2.VideoCapture("udpsrc ...", cv2.CAP_GSTREAMER)` fails on the Windows venv.
+For Phase 3b the companion therefore runs in WSL, where `python3-opencv` (apt)
+is built with GStreamer.
+
+One-time WSL setup:
+
+```bash
+sudo apt-get install -y python3-opencv python3-numpy
+pip3 install --user pymavlink==2.4.49 matplotlib
+python3 -c "import cv2,re; info=cv2.getBuildInformation(); \
+  print('cv2', cv2.__version__); \
+  print('GStreamer:', re.search(r'GStreamer:\s*(\S+)', info).group(1))"
+# Expect:
+#   cv2 4.5.4
+#   GStreamer: YES
+```
+
+If `GStreamer: NO`, the `python3-opencv` install is broken; reinstall or use
+a self-built OpenCV with `-DWITH_GSTREAMER=ON`.
+
+Running the Gazebo companion (WSL terminal #2 while `run_iris_sim.sh` runs
+in terminal #1):
+
+```bash
+cd /mnt/c/Users/user/Desktop/projects/boat_lending
+python3 companion/companion.py --stage 1 \
+    --camera-backend gstreamer --cam-port 5600 \
+    --mav-url udpout:127.0.0.1:14551
+```
+
+Unit smoke (no real gstreamer needed, mocks `cv2.VideoCapture`):
+
+```bash
+python3 scripts/smoke_gst_camera_receive.py
+```
+
+The Webots companion (on Windows, `companion/.venv`) keeps using the TCP
+backend and is untouched.
+
+## 9. Known limitations
 
 - `gz sim -s` without a GUI client sometimes holds the world paused despite
   `-r`. Workaround: `gz service -s /world/<name>/control --reqtype
   gz.msgs.WorldControl --reptype gz.msgs.Boolean --timeout 3000 --req "pause: false"`.
 - Camera sensors in Harmonic do **not** render until `enable_streaming`
-  receives `data: true`. The camera-visual scripts handle this automatically;
-  the coupling scripts avoid the camera altogether.
+  receives `data: true`. `run_iris_sim.sh` pokes the topic after SITL is
+  ticking so the Ogre2 render context initializes without stalling bring-up.
+- Leaked UDP sockets on 9002/9003 persist across WSL bash sessions when
+  a previous gz sim / arducopter exits abruptly. If the smoke suddenly shows
+  "No JSON sensor message received, resending servos" and world doesn't
+  tick, run `wsl --shutdown` from Windows to reset the WSL kernel state and
+  retry.
 - `~/.bashrc` is not sourced by `bash -c` or `setsid`; all scripts under
   `gazebo/scripts/` export `GZ_SIM_SYSTEM_PLUGIN_PATH` and
   `GZ_SIM_RESOURCE_PATH` explicitly at the top.

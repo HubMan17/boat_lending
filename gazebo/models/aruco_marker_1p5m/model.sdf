@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="aruco_marker_1p5m">
+    <static>true</static>
+    <link name="marker_link">
+      <visual name="marker_visual">
+        <cast_shadows>false</cast_shadows>
+        <geometry>
+          <box>
+            <size>1.5 1.5 0.002</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+          <pbr>
+            <metal>
+              <albedo_map>model://aruco_marker_1p5m/materials/textures/aruco_0.png</albedo_map>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+      <collision name="marker_collision">
+        <geometry>
+          <box>
+            <size>1.5 1.5 0.002</size>
+          </box>
+        </geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>

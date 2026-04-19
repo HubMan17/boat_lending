@@ -1,0 +1,66 @@
+<?xml version="1.0" ?>
+<!--
+  iris_precland.sdf — Phase 3b precision-landing bring-up world.
+
+  Contents:
+    - iris_with_downcam (iris_with_ardupilot + fixed downward 640x480 camera
+      with GstCameraPlugin → UDP:5600)
+    - aruco_marker_1p5m, DICT_4X4_50 id=0, placed 5 m east of world origin
+      (matches Phase 2 offset pattern and the e2e target)
+
+  Derived from iris_coupling.sdf; same physics/plugin boilerplate. The camera
+  sensor only renders once enable_streaming is poked; the launcher enables it
+  after SITL is ticking so the Ogre2 render context doesn't stall the main
+  loop during bring-up.
+-->
+<sdf version="1.9">
+  <world name="iris_precland">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>250</real_time_update_rate>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <light name="sun" type="directional">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>1 1 1 1</diffuse>
+      <specular>0.5 0.5 0.5 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="c">
+          <geometry><plane><normal>0 0 1</normal><size>200 200</size></plane></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><plane><normal>0 0 1</normal><size>200 200</size></plane></geometry>
+          <material>
+            <ambient>0.3 0.3 0.3 1</ambient>
+            <diffuse>0.3 0.3 0.3 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <include>
+      <uri>model://iris_with_downcam</uri>
+      <pose>0 0 0.195 0 0 0</pose>
+    </include>
+
+    <include>
+      <uri>model://aruco_marker_1p5m</uri>
+      <pose>5 0 0.001 0 0 0</pose>
+    </include>
+  </world>
+</sdf>
