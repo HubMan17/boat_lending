@@ -191,7 +191,68 @@ python3 scripts/smoke_gst_camera_receive.py
 The Webots companion (on Windows, `companion/.venv`) keeps using the TCP
 backend and is untouched.
 
-## 9. Known limitations
+## 9. End-to-end precision landing run (P3b.5)
+
+`run_iris_sim.sh` exposes three MAVLink endpoints on loopback so that the
+UDP bridge, companion, and e2e script each get a dedicated TCP client
+slot (the SITL serial ports are single-client):
+
+| Port | Owner               | Note                                    |
+|------|---------------------|-----------------------------------------|
+| 5760 | `sitl_udp_bridge.py` → MP | SERIAL0, kick-starts SITL main loop |
+| 5762 | (reserved)          | SERIAL1 — used by ArduPilot autotest defaults |
+| 5763 | companion           | SERIAL2, `SERIAL2_PROTOCOL=2`           |
+| 5765 | e2e / user GCS      | SERIAL3, `SERIAL3_PROTOCOL=2`           |
+
+Autonomous one-shot run (takeoff → fly to marker → LAND → XY check +
+Gazebo ground-truth CSV):
+
+```bash
+# Terminal 1: bring up sim (blocks; Ctrl+C tears down gz + SITL + bridge)
+cd ~/proj/boat_lending
+EXTRA_DEFAULTS=params/precland_copter.parm bash gazebo/scripts/run_iris_sim.sh
+
+# Terminal 2: e2e (autolaunches companion + gz_groundtruth_logger)
+python3 scripts/e2e_precland.py \
+    --mav tcp:127.0.0.1:5765 \
+    --marker-x 5.0 --marker-y 0.0 --alt 10 --offset 0 \
+    --companion --camera-backend gstreamer --cam-fov 1.2 \
+    --companion-mav tcp:127.0.0.1:5763 \
+    --gt-csv /tmp/gt.csv
+```
+
+Expected tail:
+
+```
+[e2e] landed at x=4.998 y=0.000 z=-0.190
+[e2e] marker at  x=5.000 y=0.000
+[e2e] XY error: 0.002 m (threshold: 0.5 m)
+[e2e] PASS (error 0.002 <= 0.5)
+```
+
+Post-mortem plots + metrics from the BIN log, cross-checked against the
+Gazebo ground-truth CSV:
+
+```bash
+python3 scripts/analyze_precland_log.py \
+    ~/boat_lending/ardupilot/logs/<latest>.BIN \
+    --gt-csv /tmp/gt.csv --output-dir /tmp/precland_analysis
+```
+
+10-run batch (requires `wsl --shutdown` between iterations per limitation
+below — run each iteration manually for now):
+
+```bash
+bash gazebo/scripts/batch_e2e_precland.sh 10
+```
+
+Coord convention: Gazebo world frame is ENU (X=East, Y=North, Z=Up) while
+ArduPilot's LOCAL_POSITION_NED is NED. `iris_precland.sdf` places the
+marker at Gazebo pose `0 5` so it lands on ArduPilot NED `(5, 0)` — that is,
+"5 m North of home", matching the Webots Phase 1 pattern and the
+`--marker-x 5 --marker-y 0` default.
+
+## 10. Known limitations
 
 - `gz sim -s` without a GUI client sometimes holds the world paused despite
   `-r`. Workaround: `gz service -s /world/<name>/control --reqtype
@@ -204,6 +265,11 @@ backend and is untouched.
   "No JSON sensor message received, resending servos" and world doesn't
   tick, run `wsl --shutdown` from Windows to reset the WSL kernel state and
   retry.
+- gz-sim-sensors-system + Ogre2 hangs on the **second** `gz sim` start of
+  a WSL session: the camera sensor blocks render-context init with only
+  the "gz frame_id warnings" in the log. A fresh `wsl --shutdown` between
+  runs clears it. This is why `batch_e2e_precland.sh` currently needs to
+  be looped manually — each iteration requires a fresh WSL.
 - `~/.bashrc` is not sourced by `bash -c` or `setsid`; all scripts under
   `gazebo/scripts/` export `GZ_SIM_SYSTEM_PLUGIN_PATH` and
   `GZ_SIM_RESOURCE_PATH` explicitly at the top.

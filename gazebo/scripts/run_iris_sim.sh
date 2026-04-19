@@ -18,6 +18,7 @@
 #   WIN_IP          Mission Planner IP  (default: WSL default-route gateway)
 #   GCS_PORT        UDP port for MP     (default: 14550)
 #   SERIAL2         --serial2 URI       (default: tcp:5763)
+#   SERIAL3         --serial3 URI       (default: tcp:5765; SERIAL1 already on 5762)
 #   DEFAULTS        params file         (default: autotest copter.parm)
 #   EXTRA_DEFAULTS  comma-separated extra parm overlays (repo-relative ok)
 #   LOG_DIR         log directory       (default: /tmp)
@@ -43,6 +44,7 @@ WORLD="${WORLD:-$REPO_DIR/gazebo/worlds/iris_precland.sdf}"
 WIN_IP="${WIN_IP:-$(ip route show | awk '/^default/ {print $3; exit}')}"
 GCS_PORT="${GCS_PORT:-14550}"
 SERIAL2="${SERIAL2:-tcp:5763}"
+SERIAL3="${SERIAL3:-tcp:5765}"
 DEFAULTS="${DEFAULTS:-$ARDUPILOT_DIR/Tools/autotest/default_params/copter.parm}"
 LOG_DIR="${LOG_DIR:-/tmp}"
 
@@ -80,6 +82,7 @@ echo "ag dir       : $AG_DIR"
 echo "windows host : $WIN_IP"
 echo "gcs port     : $GCS_PORT"
 echo "serial2      : $SERIAL2"
+echo "serial3      : $SERIAL3"
 echo "defaults     : $DEFAULTS"
 echo "viewer       : $([[ $WANT_VIEWER -eq 1 ]] && echo enabled || echo disabled)"
 echo "gz log       : $GZ_LOG"
@@ -116,15 +119,7 @@ setsid gz sim -s -r -v 2 "$WORLD" > "$GZ_LOG" 2>&1 < /dev/null &
 GZ_PID=$!
 disown
 echo "   gz pid=$GZ_PID"
-
-echo '>> waiting up to 20s for physics to tick'
-for _ in $(seq 1 20); do
-  sleep 1
-  if timeout 1 gz topic -e -t "/world/$WORLD_NAME/stats" -n 1 > /dev/null 2>&1; then
-    echo "   sim ticking"
-    break
-  fi
-done
+sleep 3
 
 echo '>> starting arducopter JSON SITL'
 cd "$ARDUPILOT_DIR"
@@ -132,6 +127,7 @@ setsid ./build/sitl/bin/arducopter -S -I0 -w \
   --model JSON --speedup 1 \
   --defaults "$DEFAULTS" \
   --serial2 "$SERIAL2" \
+  --serial3 "$SERIAL3" \
   > "$ARDU_LOG" 2>&1 < /dev/null &
 SITL_PID=$!
 disown
@@ -151,9 +147,31 @@ if ! ss -tln 2>/dev/null | grep -q ':5760 '; then
   exit 1
 fi
 
+# Start UDP bridge in the background NOW: connecting to :5760 unblocks
+# arducopter's main loop (lock_step handshake) and only then gz sim's
+# sensors plugin finishes Ogre2 init — so camera topic + extra serials
+# appear. Keeping bridge in foreground (as the original exec) starved
+# that init, leaving the whole pipeline wedged on first launch.
+echo '>> launching UDP bridge (bg)'
+python3 "$BRIDGE" \
+  --sitl-host 127.0.0.1 --sitl-port 5760 \
+  --gcs-host "$WIN_IP"  --gcs-port "$GCS_PORT" \
+  > "$LOG_DIR/udp_bridge.log" 2>&1 < /dev/null &
+BRIDGE_PID=$!
+echo "   bridge pid=$BRIDGE_PID"
+
+echo '>> waiting up to 20s for physics to tick (needs bridge → arducopter → servos → gz)'
+for _ in $(seq 1 20); do
+  sleep 1
+  if timeout 1 gz topic -e -t "/world/$WORLD_NAME/stats" -n 1 > /dev/null 2>&1; then
+    echo "   sim ticking"
+    break
+  fi
+done
+
 echo '>> enabling camera streaming'
 CAM_TOPIC=""
-for _ in $(seq 1 15); do
+for _ in $(seq 1 20); do
   CAM_TOPIC=$(gz topic -l 2>/dev/null | grep enable_streaming | head -1 || true)
   [[ -n "$CAM_TOPIC" ]] && break
   sleep 1
@@ -177,7 +195,6 @@ if [[ $WANT_VIEWER -eq 1 ]]; then
   echo "   viewer pid=$VIEWER_PID"
 fi
 
-echo '>> launching UDP bridge (Ctrl+C stops everything)'
-exec python3 "$BRIDGE" \
-  --sitl-host 127.0.0.1 --sitl-port 5760 \
-  --gcs-host "$WIN_IP"  --gcs-port "$GCS_PORT"
+echo '>> sim ready; bridge running in bg (Ctrl+C stops everything)'
+# wait on the bridge so this script mirrors the old foreground behaviour.
+wait "$BRIDGE_PID"

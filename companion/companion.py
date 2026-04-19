@@ -15,7 +15,7 @@ import threading
 import time
 
 from camera_receive import CameraReceiver
-from detector import ArucoDetector, Detection
+from detector import ArucoDetector, Detection, DEFAULT_FOV_RAD
 from mavlink_sender import MavlinkSender
 from optical_flow import OpticalFlow
 
@@ -61,6 +61,7 @@ def run(stage: int, cam_host: str, cam_port: int,
         track_enabled: threading.Event | None = None,
         stop: threading.Event | None = None,
         camera_backend: str = "tcp",
+        cam_fov_rad: float = DEFAULT_FOV_RAD,
         show: bool = False) -> None:
     if show:
         import cv2 as _cv2
@@ -73,7 +74,7 @@ def run(stage: int, cam_host: str, cam_port: int,
     if track_enabled is None:
         track_enabled = threading.Event()
 
-    detector = ArucoDetector()
+    detector = ArucoDetector(fov_rad=cam_fov_rad)
     flow = OpticalFlow() if stage >= 2 else None
     last_alt = DEFAULT_ALT
     prev_alt = DEFAULT_ALT
@@ -333,6 +334,9 @@ def main() -> None:
     parser.add_argument("--mav-url", default="tcp:127.0.0.1:5763",
                         help="MAVLink connection URL (default: tcp:127.0.0.1:5763)")
     parser.add_argument("--marker-id", type=int, default=0)
+    parser.add_argument("--cam-fov", type=float, default=DEFAULT_FOV_RAD,
+                        help=f"Camera horizontal FOV (rad). Default {DEFAULT_FOV_RAD:.4f} "
+                             f"matches Webots; Gazebo iris_with_downcam uses 1.2")
     parser.add_argument("--track", action="store_true",
                         help="Enable PID tracker (default: off)")
     parser.add_argument("--track-max-alt", type=float, default=TRACK_MAX_ALT,
@@ -358,6 +362,7 @@ def main() -> None:
     run(args.stage, args.cam_host, args.cam_port,
         args.mav_url, args.marker_id, args.track_max_alt,
         track_enabled=te, camera_backend=args.camera_backend,
+        cam_fov_rad=args.cam_fov,
         show=args.show)
 
 

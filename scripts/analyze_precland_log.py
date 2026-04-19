@@ -2,6 +2,7 @@
 """Analyze ArduCopter .BIN log for precision landing performance."""
 
 import argparse
+import csv
 import math
 import os
 import sys
@@ -17,8 +18,41 @@ def parse_args():
     p = argparse.ArgumentParser(description="Analyze precision landing BIN log")
     p.add_argument("binfile", help="Path to .BIN log file")
     p.add_argument("--output-dir", default=None, help="Directory for PNG output (default: same as BIN)")
+    p.add_argument("--gt-csv", default=None,
+                   help="Optional Gazebo/Webots ground-truth CSV "
+                        "(schema: time_s, iris_*, marker_* rows). "
+                        "Used to compute an independent 'true' final XY error.")
     p.add_argument("--show", action="store_true", help="Open plots interactively")
     return p.parse_args()
+
+
+def analyze_gt_csv(path):
+    if not os.path.isfile(path):
+        print(f"WARN: gt-csv not found: {path}", file=sys.stderr)
+        return None
+    last = None
+    count = 0
+    with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        required = {"iris_x", "iris_y", "marker_x", "marker_y"}
+        if not required.issubset(set(reader.fieldnames or [])):
+            print(f"WARN: gt-csv missing columns {required - set(reader.fieldnames or [])}",
+                  file=sys.stderr)
+            return None
+        for row in reader:
+            last = row
+            count += 1
+    if not last:
+        return None
+    ix = float(last["iris_x"]); iy = float(last["iris_y"])
+    mx = float(last["marker_x"]); my = float(last["marker_y"])
+    err = math.sqrt((ix - mx) ** 2 + (iy - my) ** 2)
+    return {
+        "gt_rows": count,
+        "gt_iris_final_xy": (round(ix, 3), round(iy, 3)),
+        "gt_marker_xy": (round(mx, 3), round(my, 3)),
+        "gt_true_final_xy_error_m": round(err, 3),
+    }
 
 
 def load_messages(path):
@@ -185,6 +219,13 @@ def main():
     print("\n=== Precision Landing Metrics ===")
     for k, v in metrics.items():
         print(f"  {k}: {v}")
+
+    if args.gt_csv:
+        gt = analyze_gt_csv(args.gt_csv)
+        if gt:
+            print("\n=== Ground Truth (independent) ===")
+            for k, v in gt.items():
+                print(f"  {k}: {v}")
 
     plot_trajectory(pl_msgs, output_dir)
     plot_altitude(pl_msgs, ctun_msgs, output_dir)

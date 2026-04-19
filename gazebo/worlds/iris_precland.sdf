@@ -58,9 +58,13 @@
       <pose>0 0 0.195 0 0 0</pose>
     </include>
 
+    <!-- Gazebo world frame is ENU (X=East, Y=North); ArduPilot home frame is
+         NED. Marker at Gazebo pose (0, 5) lands on ArduPilot NED (5, 0) —
+         i.e. "5 m North of home", matching e2e_precland.py defaults.
+    -->
     <include>
       <uri>model://aruco_marker_1p5m</uri>
-      <pose>5 0 0.001 0 0 0</pose>
+      <pose>0 5 0.001 0 0 0</pose>
     </include>
   </world>
 </sdf>
