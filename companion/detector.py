@@ -51,8 +51,17 @@ class ArucoDetector:
         self._dist_coeffs = np.zeros(5, dtype=np.float64)
 
         dictionary = cv2.aruco.getPredefinedDictionary(ARUCO_DICT)
-        params = cv2.aruco.DetectorParameters()
-        self._detector = cv2.aruco.ArucoDetector(dictionary, params)
+        if hasattr(cv2.aruco, "ArucoDetector"):
+            # OpenCV >= 4.7 (Windows venv 4.13)
+            params = cv2.aruco.DetectorParameters()
+            detector = cv2.aruco.ArucoDetector(dictionary, params)
+            self._detect_markers = detector.detectMarkers
+        else:
+            # OpenCV <= 4.6 (Ubuntu 22.04 apt python3-opencv 4.5.4)
+            params = cv2.aruco.DetectorParameters_create()
+            self._detect_markers = lambda f: cv2.aruco.detectMarkers(
+                f, dictionary, parameters=params
+            )
 
     @property
     def camera_matrix(self) -> np.ndarray:
@@ -61,7 +70,7 @@ class ArucoDetector:
     def detect_raw(self, frame: np.ndarray) -> list[tuple]:
         """Return raw (marker_id, tx, ty, tz, px, py) without body-frame transform.
         px, py = marker center pixel coordinates."""
-        corners, ids, _ = self._detector.detectMarkers(frame)
+        corners, ids, _ = self._detect_markers(frame)
         if ids is None:
             return []
         results = []
@@ -80,7 +89,7 @@ class ArucoDetector:
         return results
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
-        corners, ids, _ = self._detector.detectMarkers(frame)
+        corners, ids, _ = self._detect_markers(frame)
         if ids is None:
             return []
 

@@ -60,7 +60,14 @@ def run(stage: int, cam_host: str, cam_port: int,
         track_max_alt: float = TRACK_MAX_ALT,
         track_enabled: threading.Event | None = None,
         stop: threading.Event | None = None,
-        camera_backend: str = "tcp") -> None:
+        camera_backend: str = "tcp",
+        show: bool = False) -> None:
+    if show:
+        import cv2 as _cv2
+        _SHOW_WINDOW = "companion"
+        _cv2.namedWindow(_SHOW_WINDOW, _cv2.WINDOW_NORMAL)
+    else:
+        _cv2 = None
     if stop is None:
         stop = _stop_event
     if track_enabled is None:
@@ -146,6 +153,27 @@ def run(stage: int, cam_host: str, cam_port: int,
                     break
 
             found = target_raw is not None
+
+            if _cv2 is not None:
+                display = _cv2.cvtColor(frame, _cv2.COLOR_GRAY2BGR) \
+                    if frame.ndim == 2 else frame.copy()
+                for raw in raw_dets:
+                    mid, _tx, _ty, _tz, px, py = raw
+                    color = (0, 255, 0) if mid == marker_id else (0, 200, 255)
+                    _cv2.circle(display, (int(px), int(py)), 30, color, 2)
+                    _cv2.putText(display, f"id={mid}",
+                                 (int(px) + 35, int(py) + 5),
+                                 _cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                _cv2.drawMarker(display, (int(cx), int(cy)), (255, 255, 255),
+                                _cv2.MARKER_CROSS, 20, 1)
+                ratio = (detect_count + (1 if found else 0)) / max(1, frame_count + 1)
+                label = (f"frame {frame_count + 1}  det {detect_count + (1 if found else 0)}"
+                         f"  hit {ratio*100:.0f}%")
+                _cv2.putText(display, label, (10, 25),
+                             _cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 1)
+                _cv2.imshow("companion", display)
+                if (_cv2.waitKey(1) & 0xFF) == ord("q"):
+                    stop.set()
 
             if found:
                 mid, tx, ty, tz, px, py = target_raw
@@ -287,6 +315,8 @@ def run(stage: int, cam_host: str, cam_port: int,
     print(f"companion: stopped. frames={frame_count} "
           f"detections={detect_count} flow={flow_count} "
           f"track={track_count}")
+    if _cv2 is not None:
+        _cv2.destroyAllWindows()
 
 
 def main() -> None:
@@ -307,6 +337,8 @@ def main() -> None:
                         help="Enable PID tracker (default: off)")
     parser.add_argument("--track-max-alt", type=float, default=TRACK_MAX_ALT,
                         help="Max altitude for tracking (default: 30)")
+    parser.add_argument("--show", action="store_true",
+                        help="Display live camera with detection overlay (needs display)")
     args = parser.parse_args()
 
     if args.cam_port is None:
@@ -325,7 +357,8 @@ def main() -> None:
 
     run(args.stage, args.cam_host, args.cam_port,
         args.mav_url, args.marker_id, args.track_max_alt,
-        track_enabled=te, camera_backend=args.camera_backend)
+        track_enabled=te, camera_backend=args.camera_backend,
+        show=args.show)
 
 
 if __name__ == "__main__":
