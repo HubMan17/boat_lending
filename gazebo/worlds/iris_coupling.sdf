@@ -1,0 +1,57 @@
+<?xml version="1.0" ?>
+<!--
+  iris_coupling.sdf — SITL ↔ Gazebo coupling smoke world.
+
+  Contains iris_with_ardupilot (no gimbal, no camera) + ground plane. This
+  isolates the JSON-SITL UDP loop from the camera sensor render pipeline,
+  which hangs gz sim's main loop in headless WSL2 (separate issue, tracked
+  as P3b.4).
+
+  Derived from upstream ardupilot_gazebo worlds/iris_runway.sdf minus the
+  Fuel `model://runway` include and the iris_with_gimbal model.
+-->
+<sdf version="1.9">
+  <world name="iris_coupling">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>250</real_time_update_rate>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <light name="sun" type="directional">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>1 1 1 1</diffuse>
+      <specular>0.5 0.5 0.5 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="c">
+          <geometry><plane><normal>0 0 1</normal><size>200 200</size></plane></geometry>
+        </collision>
+        <visual name="v">
+          <geometry><plane><normal>0 0 1</normal><size>200 200</size></plane></geometry>
+          <material>
+            <ambient>0.5 0.5 0.5 1</ambient>
+            <diffuse>0.5 0.5 0.5 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <include>
+      <uri>model://iris_with_ardupilot</uri>
+    </include>
+  </world>
+</sdf>

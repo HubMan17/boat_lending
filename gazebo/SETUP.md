@@ -108,13 +108,42 @@ bash gazebo/scripts/stop_sim.sh       # kill all
 The gst viewer uses the WSLg display. Verify WSLg first with `xeyes`
 (`sudo apt-get install -y x11-apps` if missing).
 
-## 7. Known limitations
+## 7. SITL ↔ Gazebo coupling (P3b.2)
+
+Use `gazebo/scripts/run_sitl_gazebo.sh` to bring up ArduCopter JSON SITL
+against a headless Gazebo world, with the UDP bridge to Mission Planner.
+`gazebo/scripts/smoke_sitl_coupling.sh` runs a 4-check CI-style verification
+(physics ticking, bidirectional UDP on 9002/9003, SITL parses FDM, MAVLink
+on TCP:5760) and exits non-zero on failure.
+
+Two details are easy to miss and were the actual cause of the "UDP deadlock"
+P3b.2 originally described:
+
+1. **ArduCopter's main loop waits for a TCP client on :5760** before ticking.
+   Until any GCS/bridge opens that socket the vehicle loop never runs, so
+   no servo packets are sent to the plugin and the FDM side looks silent
+   on tcpdump. `run_sitl_gazebo.sh` launches `scripts/sitl_udp_bridge.py`
+   which keeps :5760 connected.
+2. **Camera sensors with Ogre2 block the main sim loop under headless WSL2.**
+   `~/ardupilot_gazebo/worlds/iris_runway.sdf` (iris with gimbal camera)
+   hangs at "Publishing pose messages" and never advances the clock, so
+   `ArduPilotPlugin::PreUpdate` is never called and servo packets pile up
+   unread in the kernel socket — matching the tcpdump-vs-no-receive
+   symptom from the original P3b.2 note. Use a camera-less world for the
+   coupling itself. Camera rendering is addressed separately in P3b.4.
+
+The repo-hosted `gazebo/worlds/iris_coupling.sdf` is a trimmed-down world
+(`iris_with_ardupilot` only, no gimbal, no Fuel downloads) that is the
+canonical environment for P3b.2 / P3b.3 coupling tests.
+
+## 8. Known limitations
 
 - `gz sim -s` without a GUI client sometimes holds the world paused despite
   `-r`. Workaround: `gz service -s /world/<name>/control --reqtype
   gz.msgs.WorldControl --reptype gz.msgs.Boolean --timeout 3000 --req "pause: false"`.
 - Camera sensors in Harmonic do **not** render until `enable_streaming`
-  receives `data: true`. Scripts handle this automatically.
-- The full SITL ↔ Gazebo coupling still has an unresolved UDP receive issue
-  (Gazebo binds 9002, SITL sends servos, plugin does not consume) — tracked
-  as P3b.2 in `PROGRESS.md`.
+  receives `data: true`. The camera-visual scripts handle this automatically;
+  the coupling scripts avoid the camera altogether.
+- `~/.bashrc` is not sourced by `bash -c` or `setsid`; all scripts under
+  `gazebo/scripts/` export `GZ_SIM_SYSTEM_PLUGIN_PATH` and
+  `GZ_SIM_RESOURCE_PATH` explicitly at the top.
