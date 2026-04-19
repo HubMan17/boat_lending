@@ -140,7 +140,8 @@ def get_final_position(conn, timeout: float = 5.0):
     return last
 
 
-def run(mav_url: str, alt: float, threshold: float) -> int:
+def run(mav_url: str, alt: float, threshold: float,
+        marker_x: float, marker_y: float) -> int:
     repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     python = os.path.join(repo_dir, "companion", ".venv", "Scripts", "python.exe")
     companion_py = os.path.join(repo_dir, "companion", "companion.py")
@@ -204,9 +205,12 @@ def run(mav_url: str, alt: float, threshold: float) -> int:
         print("ERROR: no LOCAL_POSITION_NED on landing", file=sys.stderr)
         return 1
 
-    xy_error = math.sqrt(final.x ** 2 + final.y ** 2)
+    dx = final.x - marker_x
+    dy = final.y - marker_y
+    xy_error = math.sqrt(dx ** 2 + dy ** 2)
     print(f"{LOG} landed at x={final.x:.3f} y={final.y:.3f} alt={-final.z:.2f}m")
-    print(f"{LOG} XY error from home: {xy_error:.3f} m (threshold: {threshold} m)")
+    print(f"{LOG} marker at x={marker_x:.3f} y={marker_y:.3f}")
+    print(f"{LOG} XY error from marker: {xy_error:.3f} m (threshold: {threshold} m)")
 
     if xy_error <= threshold:
         print(f"{LOG} PASS (error {xy_error:.3f} <= {threshold})")
@@ -222,9 +226,13 @@ def main() -> int:
     parser.add_argument("--alt", type=float, default=TAKEOFF_ALT,
                         help="Takeoff altitude (default: 30)")
     parser.add_argument("--threshold", type=float, default=XY_THRESHOLD,
-                        help="Max XY error for PASS (default: 0.5)")
+                        help="Max XY error from marker for PASS (default: 0.5)")
+    parser.add_argument("--marker-x", type=float, default=0.0,
+                        help="Marker NED x (north) in metres (default: 0)")
+    parser.add_argument("--marker-y", type=float, default=0.0,
+                        help="Marker NED y (east) in metres (default: 0)")
     args = parser.parse_args()
-    return run(args.mav, args.alt, args.threshold)
+    return run(args.mav, args.alt, args.threshold, args.marker_x, args.marker_y)
 
 
 if __name__ == "__main__":
