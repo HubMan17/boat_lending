@@ -53,3 +53,14 @@ desktop.ini
 # --- Local-only working state ---
 PROGRESS.md
 e2e_result.txt
+
+# --- Claude Code session state ---
+.claude/
+
+# --- Gazebo runtime captures ---
+gazebo/captures/
+cam_frame_*.jpg
+cam_frame_*.png
+camera_frame.png
+diag_*.png
+diag_*.jpg
